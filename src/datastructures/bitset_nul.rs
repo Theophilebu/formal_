@@ -518,6 +518,229 @@ where
 
 
 
+// -------------------------- Owned bitset iterator --------------------
+
+/*
+pub struct OwnedBitSetIter<UINT: Unsigned + PrimInt + Binary>
+{
+    bitset: BitSet<UINT>,
+
+    uint_index: usize,
+    index_in_uint: usize,
+    
+    working_uint: UINT,       // not really the actual uint, it gets modified
+    nbr_ones_in_uint: u32,    // same, it gets decremented
+}
+
+
+impl <UINT: Unsigned + PrimInt + Binary> OwnedBitSetIter<UINT>
+{
+
+    pub fn new(bitset: BitSet<UINT>) -> OwnedBitSetIter<UINT> {
+        // gets some values before bitset is moved
+        let working_uint: UINT = bitset.data[0];
+        let nbr_ones_in_uint: u32 = bitset.data[0].count_ones();
+        OwnedBitSetIter{
+            bitset,
+
+            uint_index: 0,
+            index_in_uint: 0,
+
+            working_uint,
+            nbr_ones_in_uint,
+        }
+    }
+
+    pub fn get_bitset(&mut self) -> &mut BitSet<UINT>{
+        &mut self.bitset
+    }
+
+}
+
+
+
+
+impl <UINT: Unsigned + PrimInt + Binary> IntoIterator for BitSet<UINT>
+{
+    type Item = usize;
+    type IntoIter = OwnedBitSetIter<UINT>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        OwnedBitSetIter::new(self)
+    }
+}
+
+impl <UINT: Unsigned + PrimInt + Binary> Iterator for OwnedBitSetIter<UINT>
+{
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        
+
+        // finds a non-empty uint, or returns None if the end is reached without encountering any zeros
+        while self.nbr_ones_in_uint == 0 {
+            // println!("cherche uint");
+            
+            self.uint_index += 1;
+            if self.uint_index == self.bitset.nbr_uints() {
+                return None;
+            }
+            
+            self.working_uint = self.bitset.data[self.uint_index];
+            self.nbr_ones_in_uint = self.working_uint.count_ones();
+        }
+        
+        /*
+        println!("uint_index: {}, index_in_uint: {}, working_uint: {:b}, nbr_ones_in_uint: {}",
+        self.uint_index, self.index_in_uint, self.working_uint, self.nbr_ones_in_uint);
+        println!("index: {}", 8*size_of::<UINT>()*self.uint_index + self.index_in_uint);
+         */
+        let one_left: UINT = UINT::one() << (8*size_of::<UINT>() - 1);
+        loop {
+            
+            if (self.working_uint & one_left) == one_left {
+                self.nbr_ones_in_uint -= 1;
+
+                let res: Option<usize> = Some(8*size_of::<UINT>()*self.uint_index + self.index_in_uint);
+                if res.unwrap() >= self.bitset.size() {
+                    return None;
+                }
+
+                if self.nbr_ones_in_uint == 0 {
+                    self.index_in_uint = 0; // returns to the start of the next uint
+                }
+                else {
+                    self.working_uint = self.working_uint << 1; // skips to the next bit
+                    self.index_in_uint += 1;
+                }
+                return res;
+            }            
+            else {
+                self.working_uint = self.working_uint << 1;
+                self.index_in_uint += 1;
+            }
+        }
+
+    }
+
+}
+
+*/
+
+// -------------------------- cycle Iterator ---------------------------
+/*
+
+pub struct BitSetCyclicIter<'bitset, UINT: Unsigned + PrimInt + Binary>
+{
+    bitset: &'bitset BitSet<UINT>,
+
+    last_non_empty_uint_index: usize,
+
+    uint_index: usize,
+    index_in_uint: usize,
+    
+    working_uint: UINT,       // not really the actual uint, it gets modified
+    nbr_ones_in_uint: u32,    // same, it gets decremented
+}
+
+impl <'bitset, UINT: Unsigned + PrimInt + Binary> BitSetCyclicIter<'bitset, UINT>
+{
+
+    pub fn new(bitset: &'bitset BitSet<UINT>) -> BitSetCyclicIter<'bitset, UINT> {
+        BitSetCyclicIter{
+            bitset,
+
+            last_non_empty_uint_index: 0,
+
+            uint_index: 0,
+            index_in_uint: 0,
+
+            working_uint: bitset.data[0],
+            nbr_ones_in_uint: bitset.data[0].count_ones(),
+        }
+    }
+
+}
+
+impl <'bitset, UINT: Unsigned + PrimInt + Binary> Iterator for BitSetCyclicIter<'bitset, UINT>
+{
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        
+        // each iteration of this loop is a traversal(complete or uncomplete) of the bitset
+        // this loops twice only if the end of the bitset is reached before a return
+        // it can't loop more than twice because it would imply that the second traversal found no element,
+        // in which case we should return None
+        loop {
+            // loop through the data
+            while self.nbr_ones_in_uint == 0 {
+                // println!("cherche uint");
+                
+                self.uint_index += 1;
+                if self.uint_index == self.bitset.nbr_uints() {
+                    self.uint_index = 0;
+                }
+                
+                self.working_uint = self.bitset.data[self.uint_index];
+                self.nbr_ones_in_uint = self.working_uint.count_ones();
+    
+                if (self.nbr_ones_in_uint > 0) {
+                    self.last_non_empty_uint_index = self.uint_index;
+                }
+                else if self.last_non_empty_uint_index == self.uint_index {
+                    return None;
+                }
+            }
+
+            /*
+            println!("uint_index: {}, index_in_uint: {}, working_uint: {:b}, nbr_ones_in_uint: {}",
+            self.uint_index, self.index_in_uint, self.working_uint, self.nbr_ones_in_uint);
+            println!("index: {}", 8*size_of::<UINT>()*self.uint_index + self.index_in_uint);
+            */
+
+            let one_left: UINT = UINT::one() << (8*size_of::<UINT>() - 1);
+            // loops through the uint
+            loop {
+                
+                if (self.working_uint & one_left) == one_left {
+                    self.nbr_ones_in_uint -= 1;
+
+                    let res: Option<usize> = Some(8*size_of::<UINT>()*self.uint_index + self.index_in_uint);
+                    if res.unwrap() >= self.bitset.size() {
+                        // end of the bitset, goes back to another loop through the bitset
+                        
+                        self.uint_index = 0;
+                        self.index_in_uint = 0;
+
+                        self.working_uint = self.bitset.data[0];
+                        self.nbr_ones_in_uint = self.bitset.data[0].count_ones();
+
+                        break;
+                    }
+
+                    if self.nbr_ones_in_uint == 0 {
+                        self.index_in_uint = 0; // returns to the start of the next uint
+                    }
+                    else {
+                        self.working_uint = self.working_uint << 1; // skips to the next bit
+                        self.index_in_uint += 1;
+                    }
+                    return res;
+                }            
+                else {
+                    self.working_uint = self.working_uint << 1;
+                    self.index_in_uint += 1;
+                }
+            }
+        }
+
+    }
+
+}
+*/
+// ---------------------------------------------------------
+
 
 
 

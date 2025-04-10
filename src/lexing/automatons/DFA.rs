@@ -1,4 +1,4 @@
-
+/*
 use crate::symbol::Symbol;
 use super::state_machine::{RunInfo, StateMachine};
 use crate::bitset::{ContiguousList, BitSet, BitSetIter};
@@ -178,3 +178,5 @@ where
         }
     }
 }
+
+*/

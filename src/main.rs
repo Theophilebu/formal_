@@ -3,14 +3,12 @@ mod grammar;
 mod parsing;
 mod lexing;
 mod symbol;
-mod bitset;
+mod datastructures;
 
 fn main() {
-    println!("Hello, world!");
-}
-
-fn thing(mut s1: String) {
-    s1.push('c');
-    let s2 = &mut s1;
-    s2.push('d');
+    let mut x = 5;
+    let y = &mut x;
+    *y += 1;
+    x+=1;
+    println!("{}", x); // prints 7
 }
