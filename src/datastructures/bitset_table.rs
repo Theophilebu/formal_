@@ -1,49 +1,123 @@
 use num::{Unsigned, PrimInt};
-use std::fmt::Binary;
+use std::{fmt::Binary, marker::PhantomData};
 
-pub struct BitSet<UINT: Unsigned + PrimInt + Binary> 
+use super::table1d::Table1D;
+
+pub struct BitSet<UINT: Unsigned + PrimInt + Binary, TABLE: Table1D<UINT>> 
 {
-    data: Vec<UINT>,
+    data: TABLE,
     size: usize,
+    phantom: PhantomData<UINT>,
 }
 
+/* 
 
-impl <UINT: Unsigned + PrimInt + Binary> BitSet<UINT>
+impl <UINT> BitSet<UINT, Vec<UINT>>
+where
+    UINT: Unsigned + PrimInt + Binary,
 {
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    fn nbr_uints(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn len(&self) -> usize {
-        // |!| not constant time
-        (&self.data).into_iter().map(|x: &UINT| (*x).count_ones() ).sum::<u32>() as usize
-    }
-
-    pub fn new_empty(size: usize) 
+    pub fn new_empty(size: usize)
     -> Self {
+        // the size is known at run-time
         let nbr_uints: usize = (size+7)/(8*size_of::<UINT>());
-        /*
-        if (8*size_of<UINT>()*nbr_uints) < size {
-            nbr_uints+=1;
-        } 
-         */  
         BitSet{ 
             data: vec![UINT::min_value(); nbr_uints], 
             size,
+            phantom: PhantomData,
         }
     }
 
     pub fn new_full(size: usize) 
     -> Self {
+        // the size is known at run-time
         let nbr_uints: usize = (size+7)/(8*size_of::<UINT>());
         BitSet{ 
             data: vec![UINT::max_value(); nbr_uints], 
             size,
+            phantom: PhantomData,
         }
+    }
+}
+
+
+impl <UINT, const NBR_UINTS: usize> BitSet<UINT, [UINT; NBR_UINTS]>
+where
+    UINT: Unsigned + PrimInt + Binary,
+{
+    pub fn new_empty(size: usize)
+    -> Self {
+        // the memory size is known at compile-time
+        assert!((size + 7) / (8 * size_of::<UINT>()) <= NBR_UINTS,
+            "NBR_UINTS should be greater or equal to (size + 7) / (8 * size_of::<UINT>()).
+            If you can't guaretee this, use new_empty_var_size");
+
+        BitSet{ 
+            data: [UINT::min_value(); NBR_UINTS], 
+            size: size,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn new_full(size: usize)
+    -> Self {
+        // the memory size is known at compile-time
+        assert!((size + 7) / (8 * size_of::<UINT>()) <= NBR_UINTS,
+            "NBR_UINTS should be greater or equal to (size + 7) / (8 * size_of::<UINT>()).
+            If you can't guaretee this, use new_full_var_size");
+
+        BitSet{ 
+            data: [UINT::max_value(); NBR_UINTS], 
+            size: size,
+            phantom: PhantomData,
+        }
+    }
+}
+
+*/
+// - - - - - - - - - - - - - - - - 
+
+impl <UINT, TABLE> BitSet<UINT, TABLE>
+where 
+    UINT: Unsigned + PrimInt + Binary,
+    TABLE: Table1D<UINT>,
+    for <'a> &'a TABLE: IntoIterator,
+    for <'a> <&'a TABLE as IntoIterator>::Item : Into<&'a UINT>,
+    // Item of the iterator can be converted into UINT
+    // apparently, writing " for<'a> <&'a T as IntoIterator>::Item == UINT " is unstable
+{
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    fn nbr_uints(&self) -> usize {
+        self.data.size().into()
+    }
+
+    fn nbr_used_uints(&self) -> usize {
+        let size: usize = self.data.size().into();
+        (size + 7) / (8 * size_of::<UINT>())
+    }
+
+    fn new_filled(value: bool, size: usize) -> BitSet<UINT, TABLE> {
+        let uint_value = match value {
+            true => {UINT::max_value()}
+            false => {UINT::min_value()}
+        };
+        BitSet {
+            data: TABLE::new_filled(uint_value, (size + 7) / (8 * size_of::<UINT>())),
+            size: size,
+            phantom: PhantomData
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        // |!| not constant time
+        (&self.data)
+            .into_iter()
+            .map(|x: <&TABLE as IntoIterator>::Item| (Into::<&UINT>::into(x)).count_ones() )
+            .sum::<u32>() 
+            as usize
     }
 
 
@@ -54,7 +128,8 @@ impl <UINT: Unsigned + PrimInt + Binary> BitSet<UINT>
         let uint_index: usize = n/(8*size_of::<UINT>()) as usize;   // index in data
         let position_in_uint: usize = n - (8*size_of::<UINT>())*uint_index;
         let bit_mask: UINT = UINT::one() << (8*size_of::<UINT>() - 1 - position_in_uint);
-        return (bit_mask & self.data[uint_index])>UINT::zero();
+        // return (bit_mask & self.data[uint_index])>UINT::zero();
+        return (bit_mask & *self.data.get(uint_index))>UINT::zero();
     }
 
     pub fn insert(&mut self, n: usize) {
@@ -64,7 +139,7 @@ impl <UINT: Unsigned + PrimInt + Binary> BitSet<UINT>
         let uint_index: usize = n/(8*size_of::<UINT>()) as usize;   // index in data
         let position_in_uint: usize = n - (8*size_of::<UINT>())*uint_index;
         let bit_mask: UINT = UINT::one() << (8*size_of::<UINT>() - 1 - position_in_uint);
-        self.data[uint_index] = bit_mask | self.data[uint_index];
+        *self.data.get_mut(uint_index) = bit_mask | *self.data.get(uint_index);
     }
 
     pub fn remove(&mut self, n: usize) {
@@ -74,7 +149,7 @@ impl <UINT: Unsigned + PrimInt + Binary> BitSet<UINT>
         let uint_index: usize = n/(8*size_of::<UINT>()) as usize;   // index in data
         let position_in_uint: usize = n - (8*size_of::<UINT>())*uint_index;
         let bit_mask: UINT = UINT::one() << (8*size_of::<UINT>() - 1 - position_in_uint);
-        self.data[uint_index] = bit_mask & self.data[uint_index];
+        *self.data.get_mut(uint_index) = bit_mask & *self.data.get(uint_index);
     }
 
     pub fn set_value(&mut self, n: usize, value: bool){
@@ -90,16 +165,20 @@ impl <UINT: Unsigned + PrimInt + Binary> BitSet<UINT>
     }
 
     
-    pub fn union(&self, other: &Self) 
-    -> Self{
+    pub fn union(&self, other: &Self) -> Self {
+    
         if self.size() != other.size() {
             panic!("operations on bitsets with different sizes are not allowed");
         }
 
-        let mut new_bitset: BitSet<UINT> = BitSet::new_empty(self.size);
+        let new_bitset: BitSet<UINT, TABLE> = BitSet::new_filled(false, self.size);
+        let tmp: &UINT = new_bitset.data.get(0);
+        *tmp = UINT::zero();
+        new_bitset.data;
 
         for i in 0..self.nbr_uints() {
-            new_bitset.data[i] = self.data[i] | other.data[i];
+            *new_bitset.data.get(i) = *self.data.get(i) | *other.data.get(i);
+            *TABLE::get(&new_bitset.data, i) = UINT::zero();
         }
 
         new_bitset
@@ -299,14 +378,6 @@ impl <UINT: Unsigned + PrimInt + Binary> BitSet<UINT>
                 .collect();
 
             total.push_str(&uint_str);
-
-            /*
-            // reverse string
-            total = total
-                .chars()
-                .rev()
-                .collect();
-            */
             s.push_str(&total);
         }
         println!("{s}");
@@ -595,9 +666,6 @@ mod tests{
         
     }
 }
-
-
-
 
 
 

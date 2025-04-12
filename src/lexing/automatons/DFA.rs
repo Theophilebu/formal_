@@ -27,7 +27,7 @@ pub enum DfaError {
 
 
 #[derive(Debug, Clone)]
-struct StateTransition {
+struct DfaStateTransition {
     origin_state_id: usize,
     symbol_read_id: usize,
     target_state_id: usize,
@@ -70,7 +70,7 @@ where
         }
     }
 
-    fn from_transitions(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize, transitions: Vec<StateTransition>, states: STATES) 
+    fn from_transitions(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize, transitions: Vec<DfaStateTransition>, states: STATES) 
     -> Result<Dfa<SINT, Vec<Vec<OptionUint<SINT>>>, RETURN, DATA, STATES>, DfaError> {
 
         // checks that for each pair (state, symbol), there is at most one transition possible.

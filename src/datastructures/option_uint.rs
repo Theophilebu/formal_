@@ -42,11 +42,11 @@ impl <SINT: Signed + PrimInt> From<Option<usize>> for OptionUint<SINT> {
     }
 }
 
-
-mod test {
+#[cfg(test)]
+mod tests {
     use super::OptionUint;
 
-
+    #[test]
     fn test2() {
         let o: OptionUint<i16> = OptionUint::from(Some(13));
         println!("{}", o.get_value().unwrap_or(100));

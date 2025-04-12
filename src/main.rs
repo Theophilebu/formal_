@@ -7,21 +7,20 @@ mod datastructures;
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount as EnumCountMacro, EnumIter};
 
-const tifhr: [usize; 2] = [0, 1];
-const tifhr2: [[usize; 2]; 2] = [[0, 1], [2, 3]];
 
-#[derive(EnumCountMacro, EnumIter)]
-enum ExmplNonTermSymb {
-    A,
-    B,
-    C,
-}
+// #[derive(EnumCountMacro, EnumIter)]
+// enum ExmplNonTermSymb {
+//     A,
+//     B,
+//     C,
+// }
+// let value: usize = ExmplNonTermSymb::A as usize;
+// for x in ExmplNonTermSymb::iter() {
+//     println!("{}", ExmplNonTermSymb::COUNT);
+
+// }
+// println!("{}", value); // prints 7
 
 fn main() {
-    let value: usize = ExmplNonTermSymb::A as usize;
-    for x in ExmplNonTermSymb::iter() {
-        println!("{}", ExmplNonTermSymb::COUNT);
-
-    }
-    println!("{}", value); // prints 7
+    println!("{}", std::mem::size_of::<Vec<u8>>());
 }
