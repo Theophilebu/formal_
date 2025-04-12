@@ -1,182 +1,192 @@
+use std::marker::PhantomData;
+
+use num::{Signed, PrimInt};
+
+use std::num::NonZeroUsize;
+use thiserror::Error;
+
+use super::state_machine::{RunInfo, State, StateMachine};
+use crate::datastructures::{option_uint::OptionUint, table1d::Table1D, table2d::Table2D};
 /*
-use crate::symbol::Symbol;
-use super::state_machine::{RunInfo, StateMachine};
-use crate::bitset::{ContiguousList, BitSet, BitSetIter};
+#[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+*/
 
 
-//<'list, 'symbol, 'f, SYMBOL, F>
 
-struct StateTransition<'list, 'symbol, 'f, SYMBOL, F>
-where
-    SYMBOL: PartialEq,
-    F: Fn(&SYMBOL) -> Option<u16>,
-    'symbol: 'list,
-    'symbol: 'f,
-{
-    origin: usize,
-    target: usize,
-    symbols: BitSet<'list, 'symbol, 'f, SYMBOL, F>,
-    // origin is repetitive information
-}
+#[derive(Error, Debug)]
+pub enum DfaError {
+    #[error("Position (i={i} , j={j}) is out of bounds")]
+    IndexOutOfBounds{i: usize, j: usize},
 
-enum ReturnValue<SYMBOL>
-{
-    NotAccepted,
-    Accepted,
-    Value(SYMBOL),
+    #[error("State {state} has multiple transitions on {symb}, it would introduce nondeterminism")]
+    NotDeterministic{state: usize, symb: usize},
 }
 
 
 
-struct DFA<'list, 'symbol, 'f, SYMBOL, F>
+
+#[derive(Debug, Clone)]
+struct StateTransition {
+    origin_state_id: usize,
+    symbol_read_id: usize,
+    target_state_id: usize,
+}
+
+
+
+struct Dfa<SINT, TABLE, RETURN, DATA, STATES>
 where
-    SYMBOL: PartialEq,
-    F: Fn(&SYMBOL) -> Option<u16>,
-    'symbol: 'list,
-    'symbol: 'f,
+    SINT: Signed + PrimInt,
+    TABLE: Table2D<OptionUint<SINT>>,
+    STATES: Table1D<State<RETURN, DATA>>
 {
     // start_state is 0
-    symbols: &'list ContiguousList<'symbol, 'f, SYMBOL, F>,  // max size: 2^16
-    transitions: Vec<Vec<StateTransition<'list, 'symbol, 'f, SYMBOL, F>>>,
-    return_values: Vec<ReturnValue<SYMBOL>>,    // return value of each state
+    // SINT is a signed integer, including i8, .., i128
+    // i8 can handle 128 states, i16 can handle 32768 states, i_n can handle 2^(n-1) states 
+    nbr_symbols: NonZeroUsize,
+    nbr_states: NonZeroUsize,
+    transition_table: TABLE,
+    states: STATES,
+    phantom: PhantomData<(SINT, RETURN, DATA)>,
 
-    // transitions[origin] = vector of outgoing transition, each with a different target
+    // transition_table.get(origin_state_id, symbol_read_id) = target_state_id
 }
 
-impl <'list, 'symbol, 'f, SYMBOL, F> DFA<'list, 'symbol, 'f, SYMBOL, F>
+
+impl <SINT, TABLE, RETURN, DATA, STATES> Dfa<SINT, TABLE, RETURN, DATA, STATES>
 where
-    SYMBOL: PartialEq,
-    F: Fn(&SYMBOL) -> Option<u16>,
-    'symbol: 'list,
-    'symbol: 'f,
+    SINT: Signed + PrimInt,
+    TABLE: Table2D<OptionUint<SINT>>,
+    STATES: Table1D<State<RETURN, DATA>>
 {
+    fn from_table(table: TABLE, states: STATES) -> Self {
+        Dfa {
+            nbr_symbols: table.width(),
+            nbr_states: table.height(),
+            transition_table: table,
+            states,
+            phantom: PhantomData,
+        }
+    }
 
-    fn new(symbols: &'list ContiguousList<'symbol, 'f, SYMBOL, F>,
-    transitions: Vec<Vec<StateTransition<'list, 'symbol, 'f, SYMBOL, F>>>, 
-    return_values: Vec<ReturnValue<SYMBOL>>,) 
-    -> Result<DFA<'list, 'symbol, 'f, SYMBOL, F>, String> {
+    fn from_transitions(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize, transitions: Vec<StateTransition>, states: STATES) 
+    -> Result<Dfa<SINT, Vec<Vec<OptionUint<SINT>>>, RETURN, DATA, STATES>, DfaError> {
 
-        // transitions is assumed to be indexed by origin(usize) and by 
         // checks that for each pair (state, symbol), there is at most one transition possible.
-        //      returns Err varient otherise
-        // symbols should be non-empty
-        ////// must have at least one transition
-        // symbol_id should return the index of a symbol in the slice
+        //      returns None variant otherwise
 
-        if symbols.len()==0{
-            return Err(String::from("this implementation of a DFA can't use an empty slice of symbols"));
-        }
+        let mut table: Vec<Vec<OptionUint<SINT>>> = 
+        vec![vec![OptionUint::from(None);nbr_symbols.into()]; nbr_states.into()];
 
-        if transitions.len()==0{
-            return Err(String::from("this implementation of a DFA must have at least one transition"));
-        }
-        
+        for transition in transitions {
+            let current_value: Option<usize> = 
+            Table2D::get(&table, transition.origin_state_id, transition.symbol_read_id).get_value();
 
-        for from_origin in symbols {
-            let mut outgoing_symbols: BitSet<'list, 'symbol, 'f, SYMBOL, F> 
-                = BitSet::new(symbols);
-
-            for transition in &transitions[origin_index] {
-                
-                if !outgoing_symbols.is_disjoint(&transition.symbols) {
-                    return Err(String::from("the automaton defined by the parameters would not be deterministic"));
-                }
-
-                outgoing_symbols.update_union(&transition.symbols);
+            if let None = current_value{
+                return Err(DfaError::NotDeterministic {
+                    state: transition.origin_state_id,
+                    symb: transition.symbol_read_id,
+                });
             }
-        }
 
+            let new_value: Option<usize> = Some(transition.target_state_id);
+            table[transition.origin_state_id][transition.symbol_read_id] = OptionUint::from(new_value);
+        }
         
-        Ok(DFA{
-            symbols,
-            symbol_id,
-            transitions,
-            return_values,
+        Ok(Dfa{
+            nbr_symbols,
+            nbr_states,
+            transition_table: table,
+            states,
+            phantom: PhantomData,
         })
     }
 
-    fn get_transition(&self, origin: usize, symbol: &SYMBOL) -> Option<&StateTransition>{
-        for outgoing_transition in self.transitions
-        .get(origin)
-        .expect("invalid origin")  {
-
-            if outgoing_transition.symbols.contains((self.symbol_id)(symbol) as usize) {
-                return Some(outgoing_transition);
-            }
-        }
-
-        None
+    fn next_state_id(&self,current_state_id: usize ,symbol_read_id: usize) -> Option<usize> {
+        self.transition_table.get(current_state_id, symbol_read_id).get_value()
     }
 
-    fn get_return_value(&self, state: usize) -> &ReturnValue {
-        return &self.return_values[state];
+    fn get_state(&self, state_id: usize) -> &State<RETURN, DATA> {
+        &self.states.get(state_id)
     }
-
 }
 
 
 
 
 
-struct DfaRunner<'symbol, SYMBOL, F>
+struct DfaRunner<'dfa, SINT, TABLE, RETURN, DATA, STATES>
 where
-    SYMBOL: PartialEq,
-    F: Fn(&SYMBOL) -> u16,
+    SINT: Signed + PrimInt,
+    TABLE: Table2D<OptionUint<SINT>>,
+    STATES: Table1D<State<RETURN, DATA>>
 {
-    dfa: DFA<'symbol, SYMBOL, F>,
-    current_state: Option<usize>,
+    dfa: &'dfa Dfa<SINT, TABLE, RETURN, DATA, STATES>,
+    current_state_id: Option<usize>,
     run_info: RunInfo,
 }
 
 
-impl <'symbol, SYMBOL, F> StateMachine<SYMBOL, usize> for DfaRunner<'symbol, SYMBOL, F>
+impl <'dfa, SINT, TABLE, RETURN, DATA, STATES> StateMachine<usize, RETURN, DATA> 
+for DfaRunner<'dfa, SINT, TABLE, RETURN, DATA, STATES>
 where
-    SYMBOL: PartialEq,
-    F: Fn(&SYMBOL) -> u16,
+    SINT: Signed + PrimInt,
+    TABLE: Table2D<OptionUint<SINT>>,
+    STATES: Table1D<State<RETURN, DATA>>
 {
+
+
+/*
+fn clear(&mut self);
+    fn get_run_info(& self) -> &RunInfo;
+    fn is_finished(&self) -> bool;
+    fn update(&mut self, symbol: &SYMBOL);
+    fn get_state(&self) -> Option<&State<RETURN, DATA>>;
+}
+*/
+
     fn clear(&mut self){
-        self.current_state = Some(0);
+        self.current_state_id = Some(0);
         self.run_info = RunInfo::Ready;
     }
 
     fn get_run_info(&self) -> &RunInfo {
         &self.run_info
     }
-
-    fn get_state(&self) -> &Option<usize> {
-        &self.current_state
-    }
-
-    fn get_return_value(&self) -> &ReturnValue {
-        self.dfa.get_return_value(self.current_state)
-    }
-
+    
     fn is_finished(&self) -> bool {
         self.run_info == RunInfo::Finished
     }
 
-    fn update(&mut self, symbol: &SYMBOL) {
+    fn update(&mut self, symbol: &usize) {
         
         if self.is_finished(){
             panic!();
         }
 
-        let Some(current_state) = self.current_state else{
+        let Some(current_state_id) = self.current_state_id else{
             panic!();
         };
 
-        let transition = self.dfa.get_transition(current_state, symbol);
-        match transition{
+        let next_state_id: Option<usize> = self.dfa.next_state_id(current_state_id, *symbol);
+        match next_state_id {
             None => {
                 self.run_info = RunInfo::Finished;
-                self.current_state = None;
+                self.current_state_id = None;
             }
-            Some(actual_transition) => {
+            Some(actual_next_state_id) => {
                 self.run_info = RunInfo::Running;
-                self.current_state = Some(actual_transition.target);
+                self.current_state_id = Some(actual_next_state_id);
             } 
+        }
+    }
+
+    fn get_state(&self) -> Option<&State<RETURN, DATA>> {
+        match self.current_state_id {
+            None => None,
+            Some(state_id) => Some(self.dfa.get_state(state_id)),
         }
     }
 }
 
-*/
