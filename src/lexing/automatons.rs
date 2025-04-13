@@ -1,4 +1,3 @@
-
-mod DFA;
-mod NFA;
+mod dfa;
+mod nfa;
 mod state_machine;
