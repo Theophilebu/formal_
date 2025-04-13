@@ -3,6 +3,7 @@ use std::num::NonZeroUsize;
 pub trait Table2D<T> {
     fn get(&self, i: usize, j: usize) -> &T;
     fn get_mut(&mut self, i: usize, j: usize) -> &mut T;
+    fn set(&mut self, value: T, i: usize, j: usize);
     fn height(&self) -> NonZeroUsize;
     fn width(&self) -> NonZeroUsize;
     fn new_filled(value: T, height: usize, width: usize) -> Self;
@@ -17,6 +18,10 @@ impl <T: Clone> Table2D<T> for Vec<Vec<T>> {
 
     fn get_mut(&mut self, i: usize, j: usize) -> &mut T {
         &mut self[i][j]
+    }
+
+    fn set(&mut self, value: T, i: usize, j: usize) {
+        self[i][j] = value;
     }
 
     fn height(&self) -> NonZeroUsize {
@@ -43,6 +48,10 @@ impl <T: Copy, const HEIGHT: usize, const WIDTH: usize> Table2D<T> for [[T; WIDT
 
     fn get_mut(&mut self, i: usize, j: usize) -> &mut T {
         &mut self[i][j]
+    }
+
+    fn set(&mut self, value: T, i: usize, j: usize) {
+        self[i][j] = value;
     }
 
     fn height(&self) -> NonZeroUsize {

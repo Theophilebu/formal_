@@ -8,6 +8,7 @@ I need to implement a method "new" which creates an empty bit set, common to eve
 pub trait Table1D<T> {
     fn get(&self, i: usize) -> &T;
     fn get_mut(&mut self, i: usize) -> &mut T;
+    fn set(&mut self, value: T, i: usize);
     fn size(&self) -> NonZeroUsize;
     fn new_filled(value: T, size: usize) -> Self;
 }
@@ -21,6 +22,10 @@ impl <T: Clone> Table1D<T> for Vec<T> {
 
     fn get_mut(&mut self, i: usize) -> &mut T {
         &mut self[i]
+    }
+
+    fn set(&mut self, value: T, i: usize) {
+        self[i] = value;
     }
 
     fn size(&self) -> NonZeroUsize {
@@ -43,6 +48,10 @@ impl <T: Copy, const SIZE: usize> Table1D<T> for [T; SIZE] {
 
     fn get_mut(&mut self, i: usize) -> &mut T {
         &mut self[i]
+    }
+
+    fn set(&mut self, value: T, i: usize) {
+        self[i] = value;
     }
 
     fn size(&self) -> NonZeroUsize {
