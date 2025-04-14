@@ -39,7 +39,7 @@ where
 
 
 
-struct Nfa<SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>
+struct Nfa<SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES>
 where
     SINT: Signed + PrimInt,
     TABLE1D: Table1D<UINT>,
@@ -58,7 +58,7 @@ where
     // transition_table.get(origin_state_id, symbol_read_id) = target_state_id
 }
 
-impl <SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES> Nfa<SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>
+impl <SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES> Nfa<SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>
 where
     SINT: Signed + PrimInt,
     TABLE1D: Table1D<UINT>,
@@ -141,7 +141,7 @@ where
 
 
 
-struct NfaRunner<'nfa, SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>
+struct NfaRunner<'nfa, SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES>
 where
     SINT: Signed + PrimInt,
     TABLE1D: Table1D<UINT>,
@@ -154,7 +154,7 @@ where
 }
 
 
-impl <'nfa, SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES> StateMachine<usize, BitSet<UINT, TABLE1D>> 
+impl <'nfa, SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES> StateMachine<usize, BitSet<UINT, TABLE1D>> 
 for NfaRunner<'nfa, SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>
 where
     SINT: Signed + PrimInt,

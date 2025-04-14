@@ -35,7 +35,7 @@ pub struct StateTransition {
 
 
 
-pub struct Dfa<SINT, TABLE, RETURN, DATA, STATES>
+pub struct Dfa<SINT, TABLE, RETURN: Clone, DATA, STATES>
 where
     SINT: Signed + PrimInt,
     TABLE: Table2D<OptionUint<SINT>>,
@@ -54,13 +54,13 @@ where
 }
 
 
-impl <SINT, TABLE, RETURN, DATA, STATES> Dfa<SINT, TABLE, RETURN, DATA, STATES>
+impl <SINT, TABLE, RETURN: Clone, DATA, STATES> Dfa<SINT, TABLE, RETURN, DATA, STATES>
 where
     SINT: Signed + PrimInt,
     TABLE: Table2D<OptionUint<SINT>>,
     STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
 {
-    fn from_table(table: TABLE, states: STATES) -> Self {
+    pub fn from_table(table: TABLE, states: STATES) -> Self {
         Dfa {
             nbr_symbols: table.width(),
             nbr_states: table.height(),
@@ -70,7 +70,7 @@ where
         }
     }
 
-    fn from_transitions(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize, transitions: Vec<StateTransition>, states: STATES) 
+    pub fn from_transitions(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize, transitions: Vec<StateTransition>, states: STATES) 
     -> Result<Dfa<SINT, Vec<Vec<OptionUint<SINT>>>, RETURN, DATA, STATES>, DfaError> {
 
         // checks that for each pair (state, symbol), there is at most one transition possible.
@@ -103,11 +103,11 @@ where
         })
     }
 
-    fn next_state_id(&self, current_state_id: usize ,symbol_read_id: usize) -> Option<usize> {
+    pub fn next_state_id(&self, current_state_id: usize ,symbol_read_id: usize) -> Option<usize> {
         self.transition_table.get(current_state_id, symbol_read_id).get_value()
     }
 
-    fn get_state(&self, state_id: usize) -> &FiniteAutomatonState<RETURN, DATA> {
+    pub fn get_state(&self, state_id: usize) -> &FiniteAutomatonState<RETURN, DATA> {
         &self.states.get(state_id)
     }
 }
@@ -116,7 +116,7 @@ where
 
 
 
-pub struct DfaRunner<'dfa, SINT, TABLE, RETURN, DATA, STATES>
+pub struct DfaRunner<'dfa, SINT, TABLE, RETURN: Clone, DATA, STATES>
 where
     SINT: Signed + PrimInt,
     TABLE: Table2D<OptionUint<SINT>>,
@@ -127,8 +127,18 @@ where
     run_info: RunInfo,
 }
 
+impl <'dfa, SINT, TABLE, RETURN: Clone, DATA, STATES> DfaRunner<'dfa, SINT, TABLE, RETURN, DATA, STATES>
+where
+    SINT: Signed + PrimInt,
+    TABLE: Table2D<OptionUint<SINT>>,
+    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+{
+    pub fn get_dfa(&self) -> &'dfa Dfa<SINT, TABLE, RETURN, DATA, STATES> {
+        self.dfa
+    }
+}
 
-impl <'dfa, SINT, TABLE, RETURN, DATA, STATES> StateMachine<usize, usize> 
+impl <'dfa, SINT, TABLE, RETURN: Clone, DATA, STATES> StateMachine<usize, usize> 
 for DfaRunner<'dfa, SINT, TABLE, RETURN, DATA, STATES>
 where
     SINT: Signed + PrimInt,
