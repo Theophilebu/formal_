@@ -5,18 +5,7 @@ pub enum RunInfo {
     Finished,
 }
 
-pub enum ReturnValue<RETURN: Clone>
-{
-    NotAccepted,
-    Accepted,
-    Value(RETURN),
-}
 
-pub struct FiniteAutomatonState<RETURN: Clone, DATA> {
-    // data might often be empty type
-    pub return_value: ReturnValue<RETURN>,
-    pub data: DATA,
-}
 
 pub trait StateMachine<SYMBOL, STATE> {
     // SYMBOL is what the machine reads

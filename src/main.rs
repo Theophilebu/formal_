@@ -1,8 +1,8 @@
-mod grammar;
+mod grammars;
 mod parsing;
 mod lexing;
-mod symbol;
 mod datastructures;
+mod formal_language;
 
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount as EnumCountMacro, EnumIter};

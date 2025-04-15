@@ -7,10 +7,10 @@ use thiserror::Error;
 
 use super::state_machine::{RunInfo, FiniteAutomatonState, StateMachine};
 use crate::datastructures::{option_uint::OptionUint, table1d::Table1D, table2d::Table2D};
-/*
-#[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-*/
+
+use super::{ReturnValue, FiniteAutomatonState};
+
+type SINT = i16;
 
 
 
@@ -35,17 +35,15 @@ pub struct StateTransition {
 
 
 
-pub struct Dfa<SINT, TABLE, RETURN: Clone, DATA, STATES>
+pub struct Dfa<TABLE, RETURN: Clone, DATA, STATES>
 where
-    SINT: Signed + PrimInt,
     TABLE: Table2D<OptionUint<SINT>>,
     STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
 {
     // start_state is 0
-    // SINT is a signed integer, including i8, .., i128
-    // i8 can handle 128 states, i16 can handle 32768 states, i_n can handle 2^(n-1) states 
-    nbr_symbols: NonZeroUsize,
-    nbr_states: NonZeroUsize,
+    // can handle up to 32768 states (change SINT for more(why though))
+    nbr_symbols: NonZeroUsize,  // non-zero because there is at least the start state 0
+    nbr_states: NonZeroUsize,   // non-zero because there is at least the start state 0
     transition_table: TABLE,
     states: STATES,
     phantom: PhantomData<(SINT, RETURN, DATA)>,
