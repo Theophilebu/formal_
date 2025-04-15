@@ -6,21 +6,52 @@ use crate::lexing::lexers::{GeneralToken, Token};
 
 type SINT = i16;
 
-pub struct DfaLexer<TOKEN_TYPE: Clone, TABLE, STATES>
+pub struct DfaLexer<'dfa, TOKEN_TYPE: Clone, TABLE, STATES>
 where
     TABLE: Table2D<OptionUint<SINT>>,
     STATES: Table1D<FiniteAutomatonState<TOKEN_TYPE, ()>>,
 {
-    dfa: Dfa<SINT, TABLE, TOKEN_TYPE, (), STATES>,
+    dfa: &'dfa Dfa<SINT, TABLE, TOKEN_TYPE, (), STATES>,
 }
 
-pub struct DfaLexerRunner<'dfa, TOKEN_TYPE: Clone, TABLE, STATES>
+impl <'dfa, TOKEN_TYPE, TABLE, STATES> DfaLexer<'dfa, TOKEN_TYPE, TABLE, STATES>
 where
+    TOKEN_TYPE: Clone,
     TABLE: Table2D<OptionUint<SINT>>,
     STATES: Table1D<FiniteAutomatonState<TOKEN_TYPE, ()>>,
 {
+    pub fn get_dfa(&self) -> &'dfa Dfa<SINT, TABLE, TOKEN_TYPE, (), STATES> {
+        self.dfa
+    }
+
+    pub fn tokenise_from_iter<IT: Iterator<Item = usize>>(&self, input_stream: IT, error_token_type: TOKEN_TYPE)
+    -> Vec<GeneralToken<usize, TOKEN_TYPE>> {
+
+        let mut dfa_lexer_runner = DfaLexerRunner::new(self, error_token_type);
+
+        for symbol in input_stream {
+            dfa_lexer_runner.update(&symbol);
+        }
+
+        dfa_lexer_runner.finish();
+
+        dfa_lexer_runner.current_state
+    }
+
+    
+}
+
+
+
+pub struct DfaLexerRunner<'dfa_lexer, 'dfa, TOKEN_TYPE: Clone, TABLE, STATES>
+where
+    'dfa: 'dfa_lexer,
+    TABLE: Table2D<OptionUint<SINT>>,
+    STATES: Table1D<FiniteAutomatonState<TOKEN_TYPE, ()>>,
+{
+    dfa_lexer: &'dfa_lexer DfaLexer<'dfa, TOKEN_TYPE, TABLE, STATES>,
     dfa_runner: DfaRunner<'dfa, SINT, TABLE, TOKEN_TYPE, (), STATES>,
-    error_output: TOKEN_TYPE,
+    error_token_type: TOKEN_TYPE,
 
     current_state: Vec<GeneralToken<usize, TOKEN_TYPE>>,
     current_lexeme: Vec<usize>,
@@ -31,9 +62,10 @@ where
 
 
 
-impl <'dfa, TOKEN_TYPE: Clone, TABLE, STATES> StateMachine<usize, Vec<GeneralToken<usize, TOKEN_TYPE>>> 
-for DfaLexerRunner<'dfa, TOKEN_TYPE, TABLE, STATES>
+impl <'dfa_lexer, 'dfa, TOKEN_TYPE: Clone, TABLE, STATES> StateMachine<usize, Vec<GeneralToken<usize, TOKEN_TYPE>>> 
+for DfaLexerRunner<'dfa_lexer, 'dfa, TOKEN_TYPE, TABLE, STATES>
 where
+    'dfa: 'dfa_lexer,
     TABLE: Table2D<OptionUint<SINT>>,
     STATES: Table1D<FiniteAutomatonState<TOKEN_TYPE, ()>>,
 {
@@ -63,12 +95,13 @@ where
 }
 
 
-impl <'dfa, TOKEN_TYPE: Clone, TABLE, STATES> DfaLexerRunner<'dfa, TOKEN_TYPE, TABLE, STATES>
-    where
+impl <'dfa_lexer, 'dfa, TOKEN_TYPE, TABLE, STATES> DfaLexerRunner<'dfa_lexer, 'dfa, TOKEN_TYPE, TABLE, STATES>
+where
+    'dfa: 'dfa_lexer,
+    TOKEN_TYPE: Clone,
     TABLE: Table2D<OptionUint<SINT>>,
     STATES: Table1D<FiniteAutomatonState<TOKEN_TYPE, ()>>,
 {
-
     fn handle_dfa_end(&mut self) {
         if self.dfa_runner.is_finished() {
             let last_symbol: usize = self.current_lexeme.pop().unwrap();
@@ -81,8 +114,8 @@ impl <'dfa, TOKEN_TYPE: Clone, TABLE, STATES> DfaLexerRunner<'dfa, TOKEN_TYPE, T
                     .return_value;
 
             let token_type_found: TOKEN_TYPE = match final_state_return_value {
-                ReturnValue::Accepted => self.error_output.clone(),
-                ReturnValue::NotAccepted => self.error_output.clone(),
+                ReturnValue::Accepted => self.error_token_type.clone(),
+                ReturnValue::NotAccepted => self.error_token_type.clone(),
                 ReturnValue::Value(output_value) => output_value.clone(),
             };
 
@@ -101,7 +134,7 @@ impl <'dfa, TOKEN_TYPE: Clone, TABLE, STATES> DfaLexerRunner<'dfa, TOKEN_TYPE, T
                 // we add an error token with this symbol only as the lexeme
 
                 self.current_state.push(GeneralToken{
-                    token_type: self.error_output.clone(),
+                    token_type: self.error_token_type.clone(),
                     lexeme: vec![last_symbol],
                     position: self.position - 1,
                 });
@@ -131,8 +164,8 @@ impl <'dfa, TOKEN_TYPE: Clone, TABLE, STATES> DfaLexerRunner<'dfa, TOKEN_TYPE, T
                     .return_value;
 
             let token_type_found: TOKEN_TYPE = match final_state_return_value {
-                ReturnValue::Accepted => self.error_output.clone(),
-                ReturnValue::NotAccepted => self.error_output.clone(),
+                ReturnValue::Accepted => self.error_token_type.clone(),
+                ReturnValue::NotAccepted => self.error_token_type.clone(),
                 ReturnValue::Value(output_value) => output_value.clone(),
             };
 
@@ -143,8 +176,29 @@ impl <'dfa, TOKEN_TYPE: Clone, TABLE, STATES> DfaLexerRunner<'dfa, TOKEN_TYPE, T
             });
         }
 
+        self.run_info = RunInfo::Finished;
+
         
     }
+
+    pub fn new(dfa_lexer: &'dfa DfaLexer<'dfa, TOKEN_TYPE, TABLE, STATES>, error_token_type: TOKEN_TYPE) -> Self {
+        
+        let dfa_runner = DfaRunner::new(dfa_lexer.get_dfa());
+
+        DfaLexerRunner {
+            dfa_lexer: dfa_lexer,
+            dfa_runner: dfa_runner,
+            error_token_type,
+            current_state: Vec::new(),
+            current_lexeme: Vec::new(),
+            lexeme_position: 0,
+            position: 0,
+            run_info: RunInfo::Ready,
+        }
+
+    }
+
 }
+
 
 

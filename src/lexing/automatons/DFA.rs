@@ -133,6 +133,14 @@ where
     TABLE: Table2D<OptionUint<SINT>>,
     STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
 {
+    pub fn new(dfa: &'dfa Dfa<SINT, TABLE, RETURN, DATA, STATES>) -> Self {
+        DfaRunner {
+            dfa: dfa,
+            current_state_id: 0,
+            run_info: RunInfo::Ready,
+        }
+    }
+
     pub fn get_dfa(&self) -> &'dfa Dfa<SINT, TABLE, RETURN, DATA, STATES> {
         self.dfa
     }
