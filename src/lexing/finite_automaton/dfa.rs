@@ -1,112 +1,200 @@
-use std::marker::PhantomData;
-
-use num::{Signed, PrimInt};
-
-use std::num::NonZeroUsize;
 use thiserror::Error;
 
-use super::state_machine::{RunInfo, FiniteAutomatonState, StateMachine};
-use crate::datastructures::{option_uint::OptionUint, table1d::Table1D, table2d::Table2D};
+use super::super::machine::{Machine, RunInfo};
+use crate::{datastructures::option_uint::OptionUint, lexing::machine::MachineError};
+use crate::formal_language::Alphabet;
 
-use super::{ReturnValue, FiniteAutomatonState};
+use super::{ReturnValue, FiniteAutomatonState, StateTransition, SINT};
 
-type SINT = i16;
 
 
 
 #[derive(Error, Debug)]
 pub enum DfaError {
-    #[error("Position (i={i} , j={j}) is out of bounds")]
-    IndexOutOfBounds{i: usize, j: usize},
+    #[error("Transitions {transition1:?} and {transition2:?} are incompatible, it would introduce nondeterminism")]
+    NotDeterministic{transition1: StateTransition, transition2: StateTransition},
 
-    #[error("State {state} has multiple transitions on {symb}, it would introduce nondeterminism")]
-    NotDeterministic{state: usize, symb: usize},
+    #[error("State Transition {transition:?} has the character {} which is not in the alphabet", transition.char_read)]
+    InvalidTransitionChar{transition: StateTransition},
+
+    #[error("State Transition {transition:?} has the origin state id {} which is not a valid state id", transition.origin_state_id)]
+    InvalidTransitionOrigin{transition: StateTransition},
+
+    #[error("State Transition {transition:?} has the target state id {} which is not a valid state id", transition.target_state_id)]
+    InvalidTransitionTarget{transition: StateTransition},
+
+    #[error("The number of states({nbr_states}) is too large (max={})", SINT::MAX)]
+    TooManyStates{nbr_states: usize},
+
+    #[error("The number of states {table_height} in the table doesn't match the length({vec_len}) of the vector states")]
+    WrongNbrStates{table_height: usize, vec_len: usize},
+
+    #[error("The number of states {table_width} in the table doesn't match the size({alphabet_size}) of the alphabet")]
+    WrongNbrChars{table_width: usize, alphabet_size: usize},
+
+    #[error("The number of states and valid chars can't be 0")]
+    EmptyTable,
+
+    #[error("The table passed should be rectangular")]
+    NonRectTable,
+    
+    #[error("The char {c} is not in the alphabet")]
+    InvalidChar{c: char},
+
+    #[error("The state id {state_id} is not valid")]
+    InvalidStateId{state_id: usize},
+}
+
+impl From<DfaError> for MachineError<DfaError> {
+    fn from(value: DfaError) -> Self {
+        MachineError::Other { other_err: value }
+    }
 }
 
 
-
-
-#[derive(Debug, Clone)]
-pub struct StateTransition {
-    pub origin_state_id: usize,
-    pub symbol_read_id: usize,
-    pub target_state_id: usize,
-}
-
-
-
-pub struct Dfa<TABLE, RETURN: Clone, DATA, STATES>
-where
-    TABLE: Table2D<OptionUint<SINT>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+pub struct Dfa<'alp, RETURN: Clone, DATA>
 {
     // start_state is 0
     // can handle up to 32768 states (change SINT for more(why though))
-    nbr_symbols: NonZeroUsize,  // non-zero because there is at least the start state 0
-    nbr_states: NonZeroUsize,   // non-zero because there is at least the start state 0
-    transition_table: TABLE,
-    states: STATES,
-    phantom: PhantomData<(SINT, RETURN, DATA)>,
+    transition_table: Vec<Vec<OptionUint<SINT>>>,
+    states: Vec<FiniteAutomatonState<RETURN, DATA>>,
+    alphabet: &'alp Alphabet,
 
-    // transition_table.get(origin_state_id, symbol_read_id) = target_state_id
+    // transition_table[origin_state_id][symbol_read_id] = target_state_id
 }
 
-
-impl <SINT, TABLE, RETURN: Clone, DATA, STATES> Dfa<SINT, TABLE, RETURN, DATA, STATES>
-where
-    SINT: Signed + PrimInt,
-    TABLE: Table2D<OptionUint<SINT>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+impl <'alp, RETURN: Clone, DATA> Dfa<'alp, RETURN, DATA>
 {
-    pub fn from_table(table: TABLE, states: STATES) -> Self {
-        Dfa {
-            nbr_symbols: table.width(),
-            nbr_states: table.height(),
-            transition_table: table,
-            states,
-            phantom: PhantomData,
-        }
+    pub fn nbr_chars(&self) -> usize {
+        self.alphabet.size()
     }
 
-    pub fn from_transitions(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize, transitions: Vec<StateTransition>, states: STATES) 
-    -> Result<Dfa<SINT, Vec<Vec<OptionUint<SINT>>>, RETURN, DATA, STATES>, DfaError> {
+    pub fn nbr_states(&self) -> usize {
+        self.states.len()
+    }
 
-        // checks that for each pair (state, symbol), there is at most one transition possible.
-        //      returns None variant otherwise
+    pub fn char_id(&self, c: char) -> Option<usize> {
+        self.alphabet.id(c)
+    }
 
+    pub fn is_char_valid(&self, c: char) -> bool {
+        !self.char_id(c).is_none()
+    }
+
+    pub fn is_state_id_valid(&self, state_id: usize) -> bool {
+        state_id<self.nbr_states()
+    }
+
+    pub fn from_table(table: Vec<Vec<OptionUint<SINT>>>, states: Vec<FiniteAutomatonState<RETURN, DATA>>,
+    alphabet: &'alp Alphabet) -> Result<Self, DfaError> {
+
+        if table.len()==0 || table[0].len()==0 {
+            return Err(DfaError::EmptyTable);
+        }
+
+        if table.len() != states.len() {
+            return Err(DfaError::WrongNbrStates { table_height: table.len(), vec_len: states.len() });
+        }
+
+        if table[0].len() != alphabet.size() {
+            return Err(DfaError::WrongNbrChars { table_width: table[0].len(), alphabet_size: alphabet.size() });
+        }
+
+        let nbr_states: usize = table.len();
+        if nbr_states>(SINT::MAX as usize) {
+            return Err(DfaError::TooManyStates { nbr_states });
+        }
+
+        let nbr_chars: usize = table[0].len();
+        if table.iter().any(|v:&Vec<OptionUint<SINT>>| v.len()!=nbr_chars) {
+            return Err(DfaError::NonRectTable);
+        }
+
+        Ok(Dfa {
+            transition_table: table,
+            states,
+            alphabet,
+        })
+    }
+
+    pub fn from_transitions( transitions: Vec<StateTransition>, states: Vec<FiniteAutomatonState<RETURN, DATA>>,
+        alphabet: &'alp Alphabet) -> Result<Self, DfaError> {
+
+        let nbr_chars: usize = alphabet.size();
+        let nbr_states: usize = states.len();
+
+        if nbr_states>(SINT::MAX as usize) {
+            return Err(DfaError::TooManyStates { nbr_states });
+        }
+
+        // empty initial table
         let mut table: Vec<Vec<OptionUint<SINT>>> = 
-        vec![vec![OptionUint::from(None);nbr_symbols.into()]; nbr_states.into()];
+        vec![vec![OptionUint::from(None);nbr_chars.into()]; nbr_states.into()];
 
+        // checks each transition and adds an element to the table
         for transition in transitions {
-            let current_value: Option<usize> = 
-            Table2D::get(&table, transition.origin_state_id, transition.symbol_read_id).get_value();
+            // checks char
+            let opt_cher_id: Option<usize> = alphabet.id(transition.char_read);
+            if let None = opt_cher_id {
+                return Err(DfaError::InvalidTransitionChar {transition});
+            }
+            let char_id: usize = opt_cher_id.unwrap();
 
-            if let Some(_) = current_value {
+            // checks origin
+            if (0>transition.origin_state_id || transition.origin_state_id>=nbr_states) {
+                return Err(DfaError::InvalidTransitionChar {transition});
+            }
+
+            // checks target
+            if (0>transition.target_state_id || transition.target_state_id>=nbr_states) {
+                return Err(DfaError::InvalidTransitionChar {transition});
+            }
+
+
+
+            let opt_current_target: Option<usize> = 
+            table[transition.origin_state_id][char_id].get_value();
+
+            // checks that for each pair (state, symbol), there is at most one transition possible.
+            if let Some(current_target) = opt_current_target {
                 return Err(DfaError::NotDeterministic {
-                    state: transition.origin_state_id,
-                    symb: transition.symbol_read_id,
+                    transition1: StateTransition {
+                        origin_state_id: transition.origin_state_id,
+                        char_read: transition.char_read,
+                        target_state_id: current_target,
+                    },
+                    transition2: transition,
                 });
             }
 
             let new_value: Option<usize> = Some(transition.target_state_id);
-            table[transition.origin_state_id][transition.symbol_read_id] = OptionUint::from(new_value);
+            table[transition.origin_state_id][char_id] = OptionUint::from(new_value);
         }
         
         Ok(Dfa{
-            nbr_symbols,
-            nbr_states,
             transition_table: table,
             states,
-            phantom: PhantomData,
+            alphabet,
         })
     }
 
-    pub fn next_state_id(&self, current_state_id: usize ,symbol_read_id: usize) -> Option<usize> {
-        self.transition_table.get(current_state_id, symbol_read_id).get_value()
+    pub fn next_state_id(&self, current_state_id: usize, char_read: char) -> Result<Option<usize>, DfaError> {
+        if !self.is_char_valid(char_read) {
+            return Err(DfaError::InvalidChar { c: char_read });
+        }
+
+        if !self.is_state_id_valid(current_state_id) {
+            return Err(DfaError::InvalidStateId { state_id: current_state_id });
+        }
+
+        Ok(self.transition_table[current_state_id][self.char_id(char_read).unwrap()].get_value())
     }
 
-    pub fn get_state(&self, state_id: usize) -> &FiniteAutomatonState<RETURN, DATA> {
-        &self.states.get(state_id)
+    pub fn get_state(&self, state_id: usize) -> Result<&FiniteAutomatonState<RETURN, DATA>, DfaError> {
+        if !self.is_state_id_valid(state_id) {
+            return Err(DfaError::InvalidStateId { state_id });
+        }
+        Ok(&self.states[state_id])
     }
 }
 
@@ -114,24 +202,20 @@ where
 
 
 
-pub struct DfaRunner<'dfa, SINT, TABLE, RETURN: Clone, DATA, STATES>
+pub struct DfaRunner<'dfa, 'alp, RETURN: Clone, DATA>
 where
-    SINT: Signed + PrimInt,
-    TABLE: Table2D<OptionUint<SINT>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+    'alp: 'dfa
 {
-    dfa: &'dfa Dfa<SINT, TABLE, RETURN, DATA, STATES>,
+    dfa: &'dfa Dfa<'alp, RETURN, DATA>,
     current_state_id: usize,
     run_info: RunInfo,
 }
 
-impl <'dfa, SINT, TABLE, RETURN: Clone, DATA, STATES> DfaRunner<'dfa, SINT, TABLE, RETURN, DATA, STATES>
+impl <'dfa, 'alp, RETURN: Clone, DATA> DfaRunner<'dfa, 'alp, RETURN, DATA>
 where
-    SINT: Signed + PrimInt,
-    TABLE: Table2D<OptionUint<SINT>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+    'alp: 'dfa
 {
-    pub fn new(dfa: &'dfa Dfa<SINT, TABLE, RETURN, DATA, STATES>) -> Self {
+    pub fn new(dfa: &'dfa Dfa<'alp, RETURN, DATA>) -> Self {
         DfaRunner {
             dfa: dfa,
             current_state_id: 0,
@@ -139,17 +223,15 @@ where
         }
     }
 
-    pub fn get_dfa(&self) -> &'dfa Dfa<SINT, TABLE, RETURN, DATA, STATES> {
+    pub fn get_dfa(&self) -> &'dfa Dfa<'alp, RETURN, DATA> {
         self.dfa
     }
 }
 
-impl <'dfa, SINT, TABLE, RETURN: Clone, DATA, STATES> StateMachine<usize, usize> 
-for DfaRunner<'dfa, SINT, TABLE, RETURN, DATA, STATES>
+impl <'dfa, 'alp, RETURN: Clone, DATA> Machine<char, usize, DfaError> 
+for DfaRunner<'dfa, 'alp, RETURN, DATA>
 where
-    SINT: Signed + PrimInt,
-    TABLE: Table2D<OptionUint<SINT>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+    'alp: 'dfa
 {
     fn clear(&mut self){
         self.current_state_id = 0;
@@ -160,13 +242,15 @@ where
         &self.run_info
     }
 
-    fn update(&mut self, symbol: &usize) {
+    fn update(&mut self, c: &char) -> Result<(), MachineError<DfaError>> {
         
-        if self.is_finished(){
-            panic!();
+        if self.is_finished() {
+            return Err(MachineError::Finished);
         }
 
-        let next_state_id: Option<usize> = self.dfa.next_state_id(self.current_state_id, *symbol);
+        let next_state_id: Option<usize> = self.dfa.next_state_id(self.current_state_id, *c)?;
+        
+        
         match next_state_id {
             None => {
                 self.run_info = RunInfo::Finished;
@@ -176,6 +260,7 @@ where
                 self.current_state_id = actual_next_state_id;
             } 
         }
+        Ok(())
     }
 
     fn get_state(&self) -> &usize {

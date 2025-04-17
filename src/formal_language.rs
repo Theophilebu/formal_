@@ -1,4 +1,34 @@
 
+
+// --------------------------------------------
+
+pub struct Alphabet {
+    chars: Vec<char>,   // sorted, no duplicates
+}
+
+impl Alphabet {
+
+    pub fn new(chars: &Vec<char>) -> Self {
+        let mut new_chars: Vec<char> = chars.clone();
+        new_chars.sort();
+        new_chars.dedup();
+        Alphabet { chars: new_chars }
+    }
+
+    pub fn id(&self, c: char) -> Option<usize> {
+        let result: Result<usize, usize> = self.chars.binary_search(&c);
+        match result {
+            Ok(index) => Some(index),
+            Err(_) => None,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        self.chars.len()
+    }
+}
+
+
 #[derive(PartialEq, Clone, Copy)]
 pub struct Symbol {
     pub id: u16,
@@ -13,10 +43,29 @@ impl From<u16> for Symbol {
 // --------------------------------------------
 
 pub struct Token {
-    token_type: Symbol,
-    lexeme: String,
-    line: usize,
-    column: usize,
+    pub token_type: Symbol,
+    pub lexeme: String,
+    pub line: usize,
+    pub column: usize,
+}
+
+impl Token {
+    pub fn next_position(&self) -> (usize, usize) {
+        // returns the line and column of the token that will come after
+        let mut line = self.line;
+        let mut column: usize = self.column;
+        for c in self.lexeme.chars() {
+            if c=='\n' {
+                line += 1;
+                column = 0;
+            }
+            else {
+                column += 1;
+            }
+        }
+
+        (line, column)
+    }
 }
 
 // --------------------------------------------

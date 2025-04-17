@@ -1,25 +1,19 @@
 use num::{Unsigned, PrimInt};
-use std::{fmt::Binary, marker::PhantomData};
+use std::fmt::Binary;
 
-use super::table1d::Table1D;
-
-pub struct BitSet<UINT: Unsigned + PrimInt + Binary, TABLE: Table1D<UINT>> 
+#[derive(Debug, Clone)]
+pub struct BitSet<UINT: Unsigned + PrimInt + Binary> 
 {
-    data: TABLE,
+    data: Vec<UINT>,
     size: usize,
-    phantom: PhantomData<UINT>,
 }
 
 // - - - - - - - - - - - - - - - - 
 
-impl <UINT, TABLE> BitSet<UINT, TABLE>
+
+impl <UINT> BitSet<UINT>
 where 
     UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
-    // for <'a> &'a TABLE: IntoIterator,
-    // for <'a> <&'a TABLE as IntoIterator>::Item : Into<&'a UINT>,
-    // Item of the iterator can be converted into UINT
-    // apparently, writing " for<'a> <&'a T as IntoIterator>::Item == UINT " is unstable
 {
 
     pub fn size(&self) -> usize {
@@ -27,7 +21,7 @@ where
     }
 
     fn nbr_uints(&self) -> usize {
-        self.data.size().into()
+        self.data.len()
     }
 
     fn nbr_used_uints(&self) -> usize {
@@ -35,25 +29,23 @@ where
     }
 
 
-    pub fn new_filled(value: bool, size: usize) -> BitSet<UINT, TABLE> {
+    pub fn new_filled(value: bool, size: usize) -> BitSet<UINT> {
         let uint_value = match value {
             true => {UINT::max_value()}
             false => {UINT::min_value()}
         };
         BitSet {
-            data: TABLE::new_filled(uint_value, (size + 7) / (8 * size_of::<UINT>())),
+            data: vec![uint_value; (size + 7) / (8 * size_of::<UINT>())],
             size: size,
-            phantom: PhantomData
         }
     }
 
-    pub fn new(table: TABLE, size: usize) -> BitSet<UINT, TABLE> {
-        assert_eq!(usize::from(table.size()), (size + 7) / (8 * size_of::<UINT>()),
+    pub fn new(data: Vec<UINT>, size: usize) -> BitSet<UINT> {
+        assert_eq!(data.len(), (size + 7) / (8 * size_of::<UINT>()),
             "the size of the table is not compatible with the given size");
         Self {
-            data: table,
+            data,
             size,
-            phantom: PhantomData,
         }
     }
 
@@ -61,7 +53,7 @@ where
         // |!| not constant time
         let mut length: u32 = 0;
         for i in 0..self.nbr_used_uints() {
-            length+=(*self.data.get(i)).count_ones();
+            length+=(self.data[i]).count_ones();
         }
         length as usize
     }
@@ -74,8 +66,7 @@ where
         let uint_index: usize = n/(8*size_of::<UINT>()) as usize;   // index in data
         let position_in_uint: usize = n - (8*size_of::<UINT>())*uint_index;
         let bit_mask: UINT = UINT::one() << (8*size_of::<UINT>() - 1 - position_in_uint);
-        // return (bit_mask & self.data[uint_index])>UINT::zero();
-        return (bit_mask & *self.data.get(uint_index))>UINT::zero();
+        return (bit_mask & self.data[uint_index])>UINT::zero();
     }
 
     pub fn insert(&mut self, n: usize) {
@@ -85,7 +76,7 @@ where
         let uint_index: usize = n/(8*size_of::<UINT>()) as usize;   // index in data
         let position_in_uint: usize = n - (8*size_of::<UINT>())*uint_index;
         let bit_mask: UINT = UINT::one() << (8*size_of::<UINT>() - 1 - position_in_uint);
-        *self.data.get_mut(uint_index) = bit_mask | *self.data.get(uint_index);
+        self.data[uint_index] = bit_mask | self.data[uint_index];
     }
 
     pub fn remove(&mut self, n: usize) {
@@ -95,7 +86,7 @@ where
         let uint_index: usize = n/(8*size_of::<UINT>()) as usize;   // index in data
         let position_in_uint: usize = n - (8*size_of::<UINT>())*uint_index;
         let bit_mask: UINT = UINT::one() << (8*size_of::<UINT>() - 1 - position_in_uint);
-        *self.data.get_mut(uint_index) = bit_mask & *self.data.get(uint_index);
+        self.data[uint_index] = bit_mask & !self.data[uint_index];
     }
 
     pub fn set_value(&mut self, n: usize, value: bool){
@@ -117,10 +108,10 @@ where
             panic!("operations on bitsets with different sizes are not allowed");
         }
 
-        let mut new_bitset: BitSet<UINT, TABLE> = BitSet::new_filled(false, self.size);
+        let mut new_bitset: BitSet<UINT> = BitSet::new_filled(false, self.size);
 
         for i in 0..self.nbr_used_uints() {
-            new_bitset.data.set(*self.data.get(i) | *other.data.get(i), i);
+            new_bitset.data[i] = self.data[i] | other.data[i];
         }
 
         new_bitset
@@ -131,10 +122,10 @@ where
             panic!("operations on bitsets with different sizes are not allowed");
         }
 
-        let mut new_bitset: BitSet<UINT, TABLE> = BitSet::new_filled(false, self.size);
+        let mut new_bitset: BitSet<UINT> = BitSet::new_filled(false, self.size);
 
         for i in 0..self.nbr_used_uints() {
-            new_bitset.data.set(*self.data.get(i) & *other.data.get(i), i);
+            new_bitset.data[i] = self.data[i] & other.data[i];
         }
 
         new_bitset
@@ -145,10 +136,10 @@ where
             panic!("operations on bitsets with different sizes are not allowed");
         }
 
-        let mut new_bitset: BitSet<UINT, TABLE> = BitSet::new_filled(false, self.size);
+        let mut new_bitset: BitSet<UINT> = BitSet::new_filled(false, self.size);
 
         for i in 0..self.nbr_used_uints() {
-            new_bitset.data.set(*self.data.get(i) &  !*other.data.get(i), i);
+            new_bitset.data[i] = self.data[i] & !other.data[i];
         }
 
         new_bitset
@@ -159,32 +150,31 @@ where
             panic!("operations on bitsets with different sizes are not allowed");
         }
 
-        let mut new_bitset: BitSet<UINT, TABLE> = BitSet::new_filled(false, self.size);
+        let mut new_bitset: BitSet<UINT> = BitSet::new_filled(false, self.size);
 
         for i in 0..self.nbr_used_uints() {
-            new_bitset.data.set(*self.data.get(i) ^ *other.data.get(i), i);
+            new_bitset.data[i] = self.data[i] ^ other.data[i];
         }
 
         new_bitset
     }
 
     pub fn complement(&self) -> Self {
-        let mut new_bitset: BitSet<UINT, TABLE> = BitSet::new_filled(false, self.size);
+        let mut new_bitset: BitSet<UINT> = BitSet::new_filled(false, self.size);
 
         for i in 0..self.nbr_used_uints() {
-            new_bitset.data.set(!*self.data.get(i), i);
+            new_bitset.data[i] = !self.data[i];
         }
 
         new_bitset
     }
 
 
-    pub fn concatenate(&self, other: &Self) -> BitSet<UINT, Vec<UINT>> {
-        let mut new_bitset: BitSet<UINT, Vec<UINT>> = 
-            BitSet::<UINT, Vec<UINT>>::new_filled(false, self.size+other.size);
+    pub fn concatenate(&self, other: &Self) -> BitSet<UINT> {
+        let mut new_bitset: BitSet<UINT> = BitSet::<UINT>::new_filled(false, self.size+other.size);
 
         for i in 0..self.nbr_used_uints() {
-            new_bitset.data.set(*self.data.get(i), i);
+            new_bitset.data[i] = self.data[i];
         }
 
         // number of bits NOT USED in the last uint of the data of self
@@ -196,22 +186,15 @@ where
 
         // -1 to avoid index out of bounds
         for index_in_uint in 0..other.nbr_used_uints()-1 {
-            new_bitset.data.set( 
-                *new_bitset.data.get(self.nbr_used_uints()-1) | *other.data.get(index_in_uint) >> left,
-                self.nbr_used_uints()+index_in_uint-1
-            );
+            new_bitset.data[self.nbr_used_uints()+index_in_uint-1] = 
+                new_bitset.data[self.nbr_used_uints()-1] | other.data[index_in_uint] >> left;
 
-            new_bitset.data.set(
-                *other.data.get(index_in_uint) << right,
-                self.nbr_used_uints()+index_in_uint
-            );            
+            new_bitset.data[self.nbr_used_uints()+index_in_uint] = other.data[index_in_uint] << right;            
         }
 
-        new_bitset.data.set( 
-            *new_bitset.data.get(self.nbr_used_uints()+other.nbr_used_uints()-2) 
-                | *other.data.get(other.nbr_used_uints()-1) >> left,
-                self.nbr_used_uints()+other.nbr_used_uints()-2
-        );
+        new_bitset.data[self.nbr_used_uints()+other.nbr_used_uints()-2] = 
+            new_bitset.data[self.nbr_used_uints()+other.nbr_used_uints()-2] 
+                | other.data[other.nbr_used_uints()-1] >> left;
 
         new_bitset
     }
@@ -223,7 +206,7 @@ where
         }
 
         for i in 0..self.nbr_used_uints() {
-            self.data.set(*self.data.get(i) | *other.data.get(i), i);
+            self.data[i] = self.data[i] | other.data[i];
         }
     }
 
@@ -233,7 +216,7 @@ where
         }
 
         for i in 0..self.nbr_used_uints() {
-            self.data.set(*self.data.get(i) & *other.data.get(i), i);
+            self.data[i] = self.data[i] & other.data[i];
         }
     }
 
@@ -243,7 +226,7 @@ where
         }
 
         for i in 0..self.nbr_used_uints() {
-            self.data.set(*self.data.get(i) & !*other.data.get(i), i);
+            self.data[i] = self.data[i] & !other.data[i];
         }
     }
 
@@ -253,26 +236,26 @@ where
         }
 
         for i in 0..self.nbr_used_uints() {
-            self.data.set(*self.data.get(i) ^ *other.data.get(i), i);
+            self.data[i] = self.data[i] ^ other.data[i];
         }
     }
 
     pub fn update_complement(&mut self) {
         for i in 0..self.nbr_used_uints() {
-            self.data.set(!*self.data.get(i), i);
+            self.data[i] = !self.data[i];
         }
     }
 
 
     pub fn clear(&mut self){
         for i in 0..self.nbr_uints(){
-            self.data.set(UINT::min_value(), i);
+            self.data[i] = UINT::min_value();
         }
     }
 
     pub fn fill(&mut self){
         for i in 0..self.nbr_uints(){
-            self.data.set(UINT::max_value(), i);
+            self.data[i] = UINT::max_value();
         }
     }
 
@@ -283,7 +266,7 @@ where
         }
 
         for i in 0..self.nbr_used_uints(){
-            if *self.data.get(i) & *other.data.get(i) > UINT::zero() {
+            if self.data[i] & other.data[i] > UINT::zero() {
                 return false;
             }
         }
@@ -293,7 +276,7 @@ where
     pub fn is_empty(&self) -> bool{
 
         for i in 0..self.nbr_used_uints() {
-            if *self.data.get(i)>UINT::zero() {
+            if self.data[i] > UINT::zero() {
                 return false;
             }
         }
@@ -302,7 +285,7 @@ where
 
     pub fn is_subset(&self, other: &Self) -> bool {
         for i in 0..self.nbr_uints(){
-            if *self.data.get(i) & !*other.data.get(i) > UINT::zero() {
+            if self.data[i] & !other.data[i] > UINT::zero() {
                 return false;
             }
         }
@@ -311,7 +294,7 @@ where
 
     pub fn is_superset(&self, other: &Self) -> bool {
         for i in 0..self.nbr_uints(){
-            if !*self.data.get(i) & *other.data.get(i) > UINT::zero() {
+            if !self.data[i] & other.data[i] > UINT::zero() {
                 return false;
             }
         }
@@ -322,7 +305,7 @@ where
     pub fn print(&self){
         let mut s: String = String::from("");
         for i in 0..self.nbr_used_uints() {
-            let uint: UINT = *self.data.get(i);
+            let uint: UINT = self.data[i];
             let uint_str: String = format!("{uint:b}");
             // total starts with 0 bits
             let mut total: String = std::iter::repeat("0")
@@ -336,40 +319,22 @@ where
     }
 
 
-    pub fn iter<'se>(&'se self) -> BitSetIter<'se, UINT, TABLE> {
-        BitSetIter::new(self)
+    pub fn iter<'se>(&'se self) -> BitSetIter<'se, UINT> {
+        self.into_iter()
     }
 
 }
 
-impl <UINT, TABLE> Clone for BitSet<UINT, TABLE>
-where 
-    UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
-{
-
-    fn clone(&self) -> Self {
-
-        let mut new_bitset: BitSet<UINT, TABLE> = BitSet::new_filled(false, self.size);
-
-        for i in 0..self.nbr_used_uints() {
-            new_bitset.data.set(*self.data.get(i), i);
-        }
-
-        new_bitset
-    }
-}
 
 
 // -------------------------- Iterator -----------------------
 
 
-pub struct BitSetIter<'bitset, UINT, TABLE>
+pub struct BitSetIter<'bitset, UINT>
 where 
     UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
 {
-    bitset: &'bitset BitSet<UINT, TABLE>,
+    bitset: &'bitset BitSet<UINT>,
 
     uint_index: usize,
     index_in_uint: usize,
@@ -379,44 +344,29 @@ where
 }
 
 
-impl <'bitset, UINT, TABLE> BitSetIter<'bitset, UINT, TABLE>
+impl <'bitset, UINT> IntoIterator for &'bitset BitSet<UINT>
 where 
     UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
 {
+    type Item = usize;
+    type IntoIter = BitSetIter<'bitset, UINT>;
 
-    pub fn new(bitset: &'bitset BitSet<UINT, TABLE>) -> BitSetIter<'bitset, UINT, TABLE> {
-        BitSetIter{
-            bitset,
+    fn into_iter(self) -> Self::IntoIter {
+        BitSetIter {
+            bitset: self,
 
             uint_index: 0,
             index_in_uint: 0,
 
-            working_uint: *bitset.data.get(0),
-            nbr_ones_in_uint: bitset.data.get(0).count_ones(),
+            working_uint: self.data[0],
+            nbr_ones_in_uint: self.data[0].count_ones(),
         }
     }
-
 }
 
-
-impl <'bitset, UINT, TABLE> IntoIterator for &'bitset BitSet<UINT, TABLE>
+impl <'bitset, UINT> Iterator for BitSetIter<'bitset, UINT>
 where 
     UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
-{
-    type Item = usize;
-    type IntoIter = BitSetIter<'bitset, UINT, TABLE>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        BitSetIter::new(self)
-    }
-}
-
-impl <'bitset, UINT, TABLE> Iterator for BitSetIter<'bitset, UINT, TABLE>
-where 
-    UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
 {
     type Item = usize;
 
@@ -425,23 +375,18 @@ where
 
         // finds a non-empty uint, or returns None if the end is reached without encountering any zeros
         while self.nbr_ones_in_uint == 0 {
-            // println!("cherche uint");
             
             self.uint_index += 1;
-            if self.uint_index == self.bitset.nbr_uints() {
+            if self.uint_index == self.bitset.nbr_used_uints() {
                 return None;
             }
             
-            self.working_uint = *self.bitset.data.get(self.uint_index);
+            self.working_uint = self.bitset.data[self.uint_index];
             self.nbr_ones_in_uint = self.working_uint.count_ones();
         }
         
-        /*
-        println!("uint_index: {}, index_in_uint: {}, working_uint: {:b}, nbr_ones_in_uint: {}",
-        self.uint_index, self.index_in_uint, self.working_uint, self.nbr_ones_in_uint);
-        println!("index: {}", 8*size_of::<UINT>()*self.uint_index + self.index_in_uint);
-         */
-        let one_left: UINT = UINT::one() << (8*size_of::<UINT>() - 1);
+
+        let one_left: UINT = UINT::one() << (8*size_of::<UINT>() - 1);  // 0b1000..0
         loop {
             
             if (self.working_uint & one_left) == one_left {
@@ -453,7 +398,7 @@ where
                 }
 
                 if self.nbr_ones_in_uint == 0 {
-                    self.index_in_uint = 0; // returns to the start of the next uint
+                    self.index_in_uint = 0; // returns to the start of the next uint with the next call of "next"
                 }
                 else {
                     self.working_uint = self.working_uint << 1; // skips to the next bit
@@ -474,12 +419,11 @@ where
 // -------------------------- Iterator mutable ref -----------------------
 
 
-pub struct MutBitSetIter<'bitset, UINT, TABLE>
+pub struct MutBitSetIter<'bitset, UINT>
 where 
     UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
 {
-    pub bitset: &'bitset mut BitSet<UINT, TABLE>,
+    pub bitset: &'bitset mut BitSet<UINT>,
 
     uint_index: usize,
     index_in_uint: usize,
@@ -489,17 +433,33 @@ where
 }
 
 
-impl <'bitset, UINT, TABLE> MutBitSetIter<'bitset, UINT, TABLE>
+impl <'bitset, UINT> MutBitSetIter<'bitset, UINT>
 where
     UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
 {
+    pub fn reset(&mut self) {
+        self.uint_index = 0;
+        self.index_in_uint = 0;
 
-    pub fn new(bitset: &'bitset mut BitSet<UINT, TABLE>) -> MutBitSetIter<'bitset, UINT, TABLE> {
-        let working_uint = *bitset.data.get(0);
+        self.working_uint = self.bitset.data[0];
+        self.nbr_ones_in_uint = self.working_uint.count_ones();
+    }
+
+}
+
+
+impl <'bitset, UINT> IntoIterator for &'bitset mut BitSet<UINT>
+where
+    UINT: Unsigned + PrimInt + Binary,
+{
+    type Item = usize;
+    type IntoIter = MutBitSetIter<'bitset, UINT>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let working_uint = self.data[0];
         let nbr_ones_in_uint = working_uint.count_ones();
         MutBitSetIter{
-            bitset,
+            bitset: self,
 
             uint_index: 0,
             index_in_uint: 0,
@@ -508,35 +468,11 @@ where
             nbr_ones_in_uint,
         }
     }
-
-    pub fn reset(&mut self) {
-        self.uint_index = 0;
-        self.index_in_uint = 0;
-
-        self.working_uint = *self.bitset.data.get(0);
-        self.nbr_ones_in_uint = self.working_uint.count_ones();
-    }
-
 }
 
-
-impl <'bitset, UINT, TABLE> IntoIterator for &'bitset mut BitSet<UINT, TABLE>
+impl <'bitset, UINT> Iterator for MutBitSetIter<'bitset, UINT>
 where
     UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
-{
-    type Item = usize;
-    type IntoIter = MutBitSetIter<'bitset, UINT, TABLE>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        MutBitSetIter::new(self)
-    }
-}
-
-impl <'bitset, UINT, TABLE> Iterator for MutBitSetIter<'bitset, UINT, TABLE>
-where
-    UINT: Unsigned + PrimInt + Binary,
-    TABLE: Table1D<UINT>,
 {
     type Item = usize;
 
@@ -548,19 +484,15 @@ where
             // println!("cherche uint");
             
             self.uint_index += 1;
-            if self.uint_index == self.bitset.nbr_uints() {
+            if self.uint_index == self.bitset.nbr_used_uints() {
                 return None;
             }
             
-            self.working_uint = *self.bitset.data.get(self.uint_index);
+            self.working_uint = self.bitset.data[self.uint_index];
             self.nbr_ones_in_uint = self.working_uint.count_ones();
         }
         
-        /*
-        println!("uint_index: {}, index_in_uint: {}, working_uint: {:b}, nbr_ones_in_uint: {}",
-        self.uint_index, self.index_in_uint, self.working_uint, self.nbr_ones_in_uint);
-        println!("index: {}", 8*size_of::<UINT>()*self.uint_index + self.index_in_uint);
-         */
+
         let one_left: UINT = UINT::one() << (8*size_of::<UINT>() - 1);
         loop {
             
@@ -573,7 +505,7 @@ where
                 }
 
                 if self.nbr_ones_in_uint == 0 {
-                    self.index_in_uint = 0; // returns to the start of the next uint
+                    self.index_in_uint = 0; // returns to the start of the next uint at the next call of "next"
                 }
                 else {
                     self.working_uint = self.working_uint << 1; // skips to the next bit
@@ -594,31 +526,32 @@ where
 
 #[cfg(test)]
 mod tests{
-    use crate::datastructures::{bitset::{BitSet, BitSetIter, MutBitSetIter}, table1d::Table1D};
+    use crate::datastructures::bitset::{BitSet, BitSetIter, MutBitSetIter};
 
     #[test]
     fn test1(){
         let table1: Vec<u8> = vec![0; 2];
         let table2: Vec<u8> = vec![0; 2];
 
-        let mut bitset1: BitSet<u8, Vec<u8>>  = BitSet::new(table1, 10);
-        let mut bitset2: BitSet<u8, Vec<u8>> = BitSet::new(table2, 10);
+        let mut bitset1: BitSet<u8>  = BitSet::new(table1, 10);
+        let mut bitset2: BitSet<u8> = BitSet::new(table2, 10);
 
         for i in 0..bitset1.nbr_used_uints() {
             let rand_value: u8 = ((197 + i*157)%255) as u8 & 0b01101001;
-            bitset1.data.set(rand_value, i);
+            bitset1.data[i] = rand_value;
         }
-        bitset1.data.set(bitset1.data[1] & 0b11000000, 1);
+        bitset1.data[1] = bitset1.data[1] & 0b11000000;
 
         
 
         for i in 0..bitset2.nbr_used_uints (){
             let rand_value: u8 = ((100 + i*37)%255) as u8 & 0b11001011;
-            bitset2.data.set(rand_value, i);
+            bitset2.data[i] = rand_value;
         }
-        bitset2.data.set(bitset2.data[1] & 0b11000000, 1);
+        bitset2.data[1] = bitset2.data[1] & 0b11000000;
 
-        println!("size: {}", bitset1.size);
+
+        println!("size: {}", bitset1.size());
         println!("bitset1.nbr_used_uints(): {}", bitset1.nbr_used_uints());
         bitset1.print();
         bitset2.print();
@@ -641,8 +574,7 @@ mod tests{
         (bitset1.concatenate(&bitset2)).print();
         bitset1.print();
 
-        let mut it: MutBitSetIter<u8, Vec<u8>> = (&mut bitset1).into_iter();
-
+        let mut it: MutBitSetIter<u8> = (&mut bitset1).into_iter();
         for i in 0..5 {
             it.bitset.insert(i);
             while let Some(symb) = it.next() {

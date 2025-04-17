@@ -1,207 +1,206 @@
-use std::marker::PhantomData;
-
-use num::{Signed, PrimInt};
-
-use std::num::NonZeroUsize;
 use thiserror::Error;
 
-use super::state_machine::{RunInfo, FiniteAutomatonState, StateMachine};
-use super::dfa::StateTransition;
-use crate::datastructures::{option_uint::OptionUint, table1d::Table1D, table2d::Table2D, bitset::BitSet};
-/*
-#[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-*/
+use super::{ReturnValue, FiniteAutomatonState, StateTransition, StateTransitionSet, SINT, UINT, EPS};
+use super::super::machine::{Machine, MachineError, RunInfo};
+use crate::{datastructures::bitset::BitSet, formal_language::Alphabet};
 
-type UINT = u8; // used for Bitsets, might slightly affect performance and memory usage?
+
+
+
 
 
 #[derive(Error, Debug)]
 pub enum NfaError {
-    #[error("Position (i={i} , j={j}) is out of bounds")]
-    IndexOutOfBounds{i: usize, j: usize},
+    #[error("State Transition {transition:?} has the character {} which is not in the alphabet", transition.char_read)]
+    InvalidTransitionChar{transition: StateTransitionSet},
 
-    // #[error("State {state} has multiple transitions on {symb}, it would introduce nondeterminism")]
-    // NotDeterministic{state: usize, symb: usize},
+    #[error("State Transition {transition:?} has the origin state id {} which is not a valid state id", transition.origin_state_id)]
+    InvalidTransitionOrigin{transition: StateTransitionSet},
+
+    #[error("State Transition {transition:?} has a target of size different than the number of states")]
+    InvalidTransitionTarget{transition: StateTransitionSet},
+
+    #[error("The number of states({nbr_states}) is too large (max={})", SINT::MAX)]
+    TooManyStates{nbr_states: usize},
+
+    #[error("The number of states {table_height} in the table doesn't match the length({vec_len}) of the vector states")]
+    WrongNbrStates{table_height: usize, vec_len: usize},
+
+    #[error("The number of chars {table_width} in the table doesn't match the size({alphabet_size}) of the alphabet")]
+    WrongNbrChars{table_width: usize, alphabet_size: usize},
+
+    #[error("The number of states and valid chars can't be 0")]
+    EmptyTable,
+
+    #[error("The table passed should be rectangular")]
+    NonRectTable,
+    
+    #[error("The char {c} is not in the alphabet")]
+    InvalidChar{c: char},
+
+    #[error("The state id {state_id} is not valid")]
+    InvalidStateId{state_id: usize},
+
+    #[error("The size of the state id set {state_id_set:?} should be equal to the number of states")]
+    InvalidStateIdSet{state_id_set: BitSet<UINT>},
+}
+
+impl From<NfaError> for MachineError<NfaError> {
+    fn from(value: NfaError) -> Self {
+        MachineError::Other { other_err: value }
+    }
 }
 
 
-
-
-struct StateTransitionSet<TABLE>
-where
-    TABLE: Table1D<UINT>,
-{
-    origin_state_id: usize,
-    symbol_read_id: usize,
-    target_states_id: BitSet<UINT, TABLE>,
-}
-
-
-
-struct Nfa<SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES>
-where
-    SINT: Signed + PrimInt,
-    TABLE1D: Table1D<UINT>,
-    TABLE2D: Table2D<BitSet<UINT, TABLE1D>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+pub struct Nfa<'alp, RETURN: Clone, DATA>
 {
     // start_state is 0
-    // SINT is a signed integer, including i8, .., i128
-    // i8 can handle 128 states, i16 can handle 32768 states, i_n can handle 2^(n-1) states 
-    nbr_symbols: NonZeroUsize,
-    nbr_states: NonZeroUsize,
-    transition_table: TABLE2D,
-    states: STATES,
-    phantom: PhantomData<(SINT, RETURN, DATA, TABLE1D)>,
+    // can handle up to 32768 states (change SINT for more(why though))
+    // EPS is state id: alphabet.size()
+    transition_table: Vec<Vec<BitSet<UINT>>>,
+    states: Vec<FiniteAutomatonState<RETURN, DATA>>,
+    alphabet: &'alp Alphabet,
 
-    // transition_table.get(origin_state_id, symbol_read_id) = target_state_id
+    // transition_table[origin_state_id][symbol_read_id] = bitset of target_state_id
 }
 
-impl <SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES> Nfa<SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>
-where
-    SINT: Signed + PrimInt,
-    TABLE1D: Table1D<UINT>,
-    TABLE2D: Table2D<BitSet<UINT, TABLE1D>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
+impl <'alp, RETURN: Clone, DATA> Nfa<'alp, RETURN, DATA>
 {
-    fn from_table(table: TABLE2D, states: STATES) -> Self {
-        Nfa {
-            nbr_symbols: table.width(),
-            nbr_states: table.height(),
-            transition_table: table,
-            states,
-            phantom: PhantomData,
-        }
+    pub fn nbr_chars(&self) -> usize {
+        self.alphabet.size()
     }
 
-    fn from_transitions(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize,
-        transitions: Vec<StateTransition>, states: STATES) 
-    -> Nfa<SINT, Vec<Vec<BitSet<UINT, TABLE1D>>>, TABLE1D, RETURN, DATA, STATES> {
-        // duplicate transitions are merged
-        let mut table: Vec<Vec<BitSet<UINT, TABLE1D>>> = 
-        vec![vec![BitSet::new_filled(false, nbr_states.into());nbr_symbols.into()]; nbr_states.into()];
-
-        for transition in transitions {
-            let current_value: &mut BitSet<UINT, TABLE1D> = 
-            Table2D::get_mut(&mut table, transition.origin_state_id, transition.symbol_read_id);
-
-            current_value.insert(transition.target_state_id);
-        }
-        
-        Nfa{
-            nbr_symbols,
-            nbr_states,
-            transition_table: table,
-            states,
-            phantom: PhantomData,
-        }
+    pub fn nbr_states(&self) -> usize {
+        self.states.len()
     }
 
-    fn from_transition_sets(nbr_symbols: NonZeroUsize, nbr_states: NonZeroUsize, 
-        transition_sets: Vec<StateTransitionSet<TABLE1D>>, states: STATES) 
-    -> Nfa<SINT, Vec<Vec<BitSet<UINT, TABLE1D>>>, TABLE1D, RETURN, DATA, STATES> {
-        // duplicate transitions are merged
-        let mut table: Vec<Vec<BitSet<UINT, TABLE1D>>> = 
-        vec![vec![BitSet::new_filled(false, nbr_states.into());nbr_symbols.into()]; nbr_states.into()];
-
-        for transition_set in transition_sets {
-            let current_value: &mut BitSet<UINT, TABLE1D> = 
-            Table2D::get_mut(&mut table, transition_set.origin_state_id, transition_set.symbol_read_id);
-
-            current_value.update_union(&transition_set.target_states_id);
-        }
-        
-        Nfa{
-            nbr_symbols,
-            nbr_states,
-            transition_table: table,
-            states,
-            phantom: PhantomData,
-        }
-    }
-
-    fn next_state_ids(&self, current_possible_state_ids: &BitSet<UINT, TABLE1D>, symbol_read_id: usize) -> BitSet<UINT, TABLE1D> {
-
-        let mut next_state_ids: BitSet<UINT, TABLE1D> = BitSet::new_filled(false, self.nbr_states.into());
-        
-        for current_possible_state_id in current_possible_state_ids {
-            next_state_ids.update_union(self.transition_table.get(current_possible_state_id, symbol_read_id));
-        }
-
-        next_state_ids
-        // self.transition_table.get(current_state_id, symbol_read_id).get_value()
-    }
-
-    fn get_state(&self, state_id: usize) -> &FiniteAutomatonState<RETURN, DATA> {
-        &self.states.get(state_id)
-    }
-}
-
-
-
-
-struct NfaRunner<'nfa, SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES>
-where
-    SINT: Signed + PrimInt,
-    TABLE1D: Table1D<UINT>,
-    TABLE2D: Table2D<BitSet<UINT, TABLE1D>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
-{
-    nfa: &'nfa Nfa<SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>,
-    current_state_ids: BitSet<UINT, TABLE1D>,
-    run_info: RunInfo,
-}
-
-
-impl <'nfa, SINT, TABLE2D, TABLE1D, RETURN: Clone, DATA, STATES> StateMachine<usize, BitSet<UINT, TABLE1D>> 
-for NfaRunner<'nfa, SINT, TABLE2D, TABLE1D, RETURN, DATA, STATES>
-where
-    SINT: Signed + PrimInt,
-    TABLE1D: Table1D<UINT>,
-    TABLE2D: Table2D<BitSet<UINT, TABLE1D>>,
-    STATES: Table1D<FiniteAutomatonState<RETURN, DATA>>
-{
-    fn clear(&mut self){
-        self.current_state_ids = BitSet::new_filled(false, self.nfa.nbr_states.into());
-        self.current_state_ids.insert(0);
-        self.run_info = RunInfo::Ready;
-    }
-
-    fn get_run_info(&self) -> &RunInfo {
-        &self.run_info
-    }
-    
-    fn is_finished(&self) -> bool {
-        self.run_info == RunInfo::Finished
-    }
-
-    fn update(&mut self, symbol: &usize) {
-        
-        if self.is_finished(){
-            panic!();
-        }
-
-        // if self.current_state_ids.len()==0 {
-        //     panic!();
-        // };
-        // logically shouldn't happen
-
-        let next_state_id: BitSet<UINT, TABLE1D> = self.nfa.next_state_ids(&self.current_state_ids, *symbol);
-        
-        if next_state_id.len()==0 {
-            self.run_info = RunInfo::Finished;
+    pub fn char_id(&self, c: char) -> Option<usize> {
+        if c==EPS {
+            Some(self.nbr_chars())
         }
         else {
-            self.current_state_ids = next_state_id;
-            self.run_info = RunInfo::Running;
+            self.alphabet.id(c)
         }
-        
-        
     }
 
-    fn get_state(&self) -> &BitSet<UINT, TABLE1D> {
-        &self.current_state_ids
+    pub fn is_char_valid(&self, c: char) -> bool {
+        // returns false for EPS
+        !self.alphabet.id(c).is_none()
+    }
+
+    pub fn is_state_id_valid(&self, state_id: usize) -> bool {
+        state_id<self.nbr_states()
+    }
+
+    pub fn from_table(table: Vec<Vec<BitSet<UINT>>>, states: Vec<FiniteAutomatonState<RETURN, DATA>>,
+        alphabet: &'alp Alphabet) -> Result<Self, NfaError> {
+
+        if table.len()==0 || table[0].len()==0 {
+            return Err(NfaError::EmptyTable);
+        }
+
+        if table.len() != states.len() {
+            return Err(NfaError::WrongNbrStates { table_height: table.len(), vec_len: states.len() });
+        }
+
+        if table[0].len() != alphabet.size() {
+            return Err(NfaError::WrongNbrChars { table_width: table[0].len(), alphabet_size: alphabet.size() });
+        }
+
+        let nbr_states: usize = table.len();
+        if nbr_states>(SINT::MAX as usize) {
+            return Err(NfaError::TooManyStates { nbr_states });
+        }
+
+        let nbr_chars: usize = table[0].len();
+        if table.iter().any(|v:&Vec<BitSet<UINT>>| v.len()!=nbr_chars) {
+            return Err(NfaError::NonRectTable);
+        }
+
+        Ok(Nfa {
+            transition_table: table,
+            states,
+            alphabet,
+        })
+    }
+
+    pub fn from_transition_sets( transitions: Vec<StateTransitionSet>, states: Vec<FiniteAutomatonState<RETURN, DATA>>,
+        alphabet: &'alp Alphabet) -> Result<Self, NfaError> {
+
+        let nbr_chars: usize = alphabet.size();
+        let nbr_states: usize = states.len();
+
+        if nbr_states>(SINT::MAX as usize) {
+            return Err(NfaError::TooManyStates { nbr_states });
+        }
+
+        // empty initial table
+        let mut table: Vec<Vec<BitSet<UINT>>> = 
+        vec![vec![BitSet::new_filled(false, nbr_chars+1);nbr_chars]; nbr_states];
+
+        // checks each transition and adds an element to the table
+        for transition in transitions {
+            // checks char
+            let opt_cher_id: Option<usize> = alphabet.id(transition.char_read);
+            if let None = opt_cher_id {
+                return Err(NfaError::InvalidTransitionChar {transition});
+            }
+            let char_id: usize = opt_cher_id.unwrap();
+
+            let char_id: usize = {
+                if transition.char_read == EPS {nbr_chars}
+                else if let Some(char_id) = alphabet.id(transition.char_read) {char_id}
+                else {return Err(NfaError::InvalidTransitionChar { transition });}
+            };
+
+            // checks origin
+            if (0>transition.origin_state_id || transition.origin_state_id>=nbr_states) {
+                return Err(NfaError::InvalidTransitionChar {transition});
+            }
+
+            // checks target: size of bitset
+            if transition.target_state_ids.size() != nbr_states {
+                return Err(NfaError::InvalidTransitionChar {transition});
+            }
+
+            table[transition.origin_state_id][char_id].update_union(&transition.target_state_ids);
+        }
+        
+        Ok(Nfa{
+            transition_table: table,
+            states,
+            alphabet,
+        })
+    }
+
+    pub fn next_state_ids(&self, current_state_ids: &BitSet<UINT>, char_read: char) -> Result<BitSet<UINT>, NfaError> {
+        // char_read can be EPS
+
+        if current_state_ids.size() != self.nbr_states() {
+            return Err(NfaError::InvalidStateIdSet { state_id_set: current_state_ids.clone() });
+        }
+
+        let Some(char_read_id) = self.char_id(char_read) else {
+            return Err(NfaError::InvalidChar { c: char_read });
+        };
+
+        let mut next_state_ids: BitSet<UINT> = BitSet::new_filled(false, self.nbr_states());
+
+        for possible_state_id in current_state_ids {
+            next_state_ids.update_union(&self.transition_table[possible_state_id][char_read_id]);
+        }
+
+        Ok(next_state_ids)
+    }
+
+    pub fn get_state(&self, state_id: usize) -> Result<&FiniteAutomatonState<RETURN, DATA>, NfaError> {
+        if !self.is_state_id_valid(state_id) {
+            return Err(NfaError::InvalidStateId { state_id });
+        }
+        Ok(&self.states[state_id])
     }
 
 }
+
+
+
