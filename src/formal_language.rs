@@ -13,11 +13,10 @@ pub struct Alphabet {
 
 impl Alphabet {
 
-    pub fn new(chars: &Vec<char>) -> Self {
-        let mut new_chars: Vec<char> = chars.clone();
-        new_chars.sort();
-        new_chars.dedup();
-        Alphabet { chars: new_chars }
+    pub fn new(mut chars: Vec<char>) -> Self {
+        chars.sort();
+        chars.dedup();
+        Alphabet { chars: chars }
     }
 
     pub fn id(&self, c: char) -> Option<usize> {
@@ -44,11 +43,14 @@ type SymbolId = u16;
 
 // to store the index of a CfgRule inside a Vec<CfgRule> of Cfg.rules
 // meaning that there can (only) be 2^8 = 256 rules for a single symbol
-type CfgRuleIdIndex = u8;
+type CfgRuleIdBySymbol = u8;
 
 // to store a value that represents a CfgRule but in a contiguous way
 // meaning that there can (only) be 2^16 = 65578 rules in total
-type CfgRuleFlatId = u16;
+type CfgRuleId = u16;
+
+// to easily get a CfgRule in a Vec<Vec<CfgRule>>
+type CfgRuleCoo = (Symbol, CfgRuleIdBySymbol);
 
 
 const EXPECTED_RULE_SIZE: usize = 10;
@@ -97,24 +99,34 @@ impl Token {
 
 pub struct SymbolSet {
     // acts like a container of the symbols from 0 to size(not included)
-    size: SymbolId,
     representations: Vec<String>,
 }
 
 impl SymbolSet {
 
-    pub fn new(size: SymbolId, representations: Vec<String>) -> Self {
-        Self { size, representations }
+    pub fn new(representations: Vec<String>) -> Self {
+        Self { representations }
     }
 
     pub fn size(&self) -> SymbolId {
-        self.size
+        self.representations.len().try_into().unwrap()
     }
 
-    pub fn get_representation(&self, symbol: Symbol) -> &String {
-        &self.representations[symbol.id as usize]
+    pub fn get_representation(&self, local_id: SymbolId) -> &String {
+        &self.representations[local_id as usize]
+    }
+
+    // debug only
+    pub fn get_id(&self, representation: &str) -> Option<SymbolId> {
+        self.representations
+            .iter()
+            .position(|s| s==representation)
+            .map(|x| SymbolId::try_from(x).unwrap())
+
     }
 }
+
+
 
 
 // --------------------------------------------
@@ -127,33 +139,6 @@ pub enum CfgError {
 
     #[error("CfgRule  {rule:?}, has an invalid replacement symbol {symbol:?}.")]
     InvalidRuleReplacement{rule: CfgRule, symbol: Symbol},
-
-    #[error("State Transition {transition:?} has the origin state id {} which is not a valid state id", transition.origin_state_id)]
-    InvalidTransitionOrigin{transition: StateTransition},
-
-    #[error("State Transition {transition:?} has the target state id {} which is not a valid state id", transition.target_state_id)]
-    InvalidTransitionTarget{transition: StateTransition},
-
-    #[error("The number of states({nbr_states}) is too large (max={})", SINT::MAX)]
-    TooManyStates{nbr_states: usize},
-
-    #[error("The number of states {table_height} in the table doesn't match the length({vec_len}) of the vector states")]
-    WrongNbrStates{table_height: usize, vec_len: usize},
-
-    #[error("The number of states {table_width} in the table doesn't match the size({alphabet_size}) of the alphabet")]
-    WrongNbrChars{table_width: usize, alphabet_size: usize},
-
-    #[error("The number of states and valid chars can't be 0")]
-    EmptyTable,
-
-    #[error("The table passed should be rectangular")]
-    NonRectTable,
-    
-    #[error("The char {c} is not in the alphabet")]
-    InvalidChar{c: char},
-
-    #[error("The state id {state_id} is not valid")]
-    InvalidStateId{state_id: usize},
 }
 
 // --------------------------------------------
@@ -176,40 +161,51 @@ impl CfgSymbolSet {
         self.non_terminals.size()
     }
 
-    fn get_terminals(&self) -> &SymbolSet {
+    pub fn get_terminals(&self) -> &SymbolSet {
         &self.terminals
     }
 
-    fn get_non_terminals(&self) -> &SymbolSet {
+    pub fn get_non_terminals(&self) -> &SymbolSet {
         &self.non_terminals
     }
 
-    fn START(&self) -> Symbol {
+    pub fn START(&self) -> Symbol {
         Symbol { id: 1 }
     }
 
-    fn END(&self) -> Symbol {
+    pub fn END(&self) -> Symbol {
         Symbol { id: self.offset_terminals() + 1 }
     }
 
-    fn ERR_NON_TERM(&self) -> Symbol{
+    pub fn ERR_NON_TERM(&self) -> Symbol{
         Symbol { id: 0 }
     }
 
-    fn ERR_TERM(&self) -> Symbol{
+    pub fn ERR_TERM(&self) -> Symbol{
         Symbol { id: self.offset_terminals() }
     }
 
+    // debug only
+    pub fn get_symbol_by_representation(&self, representation: &str) -> Symbol {
+
+        match representation {
+            "START" => self.START(),
+            "END" => self.END(),
+            "ERR_TERM" => self.ERR_TERM(),
+            "ERR_NON_TERM" => self.ERR_NON_TERM(),
+            other => {
+                Symbol {id: 
+                    match self.get_non_terminals().get_id(other) {
+                        Some(non_terminal_id) => non_terminal_id,
+                        None => self.get_terminals().get_id(other).unwrap() + self.offset_terminals(),
+                    }
+                }
+            }
+        }
+    }
 }
 
 // --------------------------------------------
-
-
-#[derive(Debug, Clone, Copy)]
-struct  CfgRuleId {
-    symbol: Symbol,
-    index: CfgRuleIdIndex,
-}
 
 #[derive(Debug, Clone)]
 pub struct CfgRule {
@@ -222,6 +218,10 @@ impl CfgRule {
     pub fn is_empty(&self) -> bool {
         self.replacement.len()==0
     }
+
+    pub fn replacement_size(&self) -> usize {
+        self.replacement.len()
+    }
 }
 
 // --------------------------------------------
@@ -231,9 +231,9 @@ pub struct Cfg {
     symbol_set: CfgSymbolSet,
     // indexed by non_terminals
     rules: Vec<Vec<CfgRule>>,
-    nbr_rules: CfgRuleFlatId,
-    // maps a CfgRuleFlatId to the corresponding CfgRuleId
-    rule_flat_id_correspondance: Vec<CfgRuleId>,
+    nbr_rules: CfgRuleId,
+    // maps a CfgRuleFlatId to the corresponding 2-dimensionnal coordinates in rules
+    rule_id_correspondance: Vec<CfgRuleCoo>,
 
     // cached values
 
@@ -259,12 +259,13 @@ pub struct Cfg {
 impl  Cfg {
 
     pub fn new(symbol_set: CfgSymbolSet, rules: Vec<Vec<CfgRule>>) -> Result<Cfg, CfgError> {
+        // sorts the rules to match the order of the non_terminals in the symbol_set
 
         let nbr_non_terminals: usize = symbol_set.get_non_terminals().size() as usize;
         let nbr_terminals: usize = symbol_set.get_terminals().size() as usize;
 
-        let mut nbr_rules: CfgRuleFlatId = 0;
-        let mut rule_flat_id_correspondance: Vec<CfgRuleId> = Vec::new();
+        let mut nbr_rules: CfgRuleId = 0;
+        let mut rule_id_correspondance: Vec<CfgRuleCoo> = Vec::new();
 
         // checks that each rule is valid
         for non_terminal_id in 0..nbr_non_terminals {
@@ -281,20 +282,20 @@ impl  Cfg {
 
                 nbr_rules += 1; 
 
-                rule_flat_id_correspondance.push(CfgRuleId {
-                    symbol: Symbol { id: SymbolId::try_from(non_terminal_id).unwrap() },
-                    index: CfgRuleIdIndex::try_from(cfg_rule_id_index).unwrap(),
-                });
+                rule_id_correspondance.push((
+                    Symbol { id: SymbolId::try_from(non_terminal_id).unwrap() },
+                    CfgRuleIdBySymbol::try_from(cfg_rule_id_index).unwrap(),
+                ));
             }
         }
 
-
+        rule_id_correspondance.shrink_to_fit();
 
         Ok(Cfg {
             symbol_set,
             rules,
             nbr_rules,
-            rule_flat_id_correspondance,
+            rule_id_correspondance,
 
             rules_producing_each_symbol: OnceCell::new(),
             are_symbols_nullable: OnceCell::new(),
@@ -303,6 +304,10 @@ impl  Cfg {
     }
 
     // -------------------------- utility methods
+
+    pub fn get_symbol_set(&self) -> &CfgSymbolSet {
+        &self.symbol_set
+    }
 
     pub fn nbr_non_terminals(&self) -> SymbolId {
         self.symbol_set.get_non_terminals().size()
@@ -321,7 +326,7 @@ impl  Cfg {
     }
 
     pub fn all_terminals(&self) -> impl Iterator<Item = Symbol> {
-        (0..(self.nbr_terminals() as SymbolId)).map(|id: SymbolId| Symbol {id})
+        (self.nbr_non_terminals()..(self.nbr_symbols() as SymbolId)).map(|id: SymbolId| Symbol {id})
     }
 
     pub fn all_symbols(&self) -> impl Iterator<Item = Symbol> {
@@ -363,18 +368,14 @@ impl  Cfg {
     // --------
 
     fn get_rule_by_id(&self, id: CfgRuleId) -> &CfgRule {
-        // no check: we assume that every CfgRuleId constructed is valid
-        &self.rules[id.symbol.id as usize][id.index as usize]
-    }
-
-    fn get_rule_by_flat_id(&self, flat_id: CfgRuleFlatId) -> &CfgRule {
         // no check: we assume that every CfgRuleFlatId constructed is valid
-        return self.get_rule_by_id(self.rule_flat_id_correspondance[flat_id as usize]);
+        let (origin, index_by_origin) = self.rule_id_correspondance[id as usize];
+        &self.rules[origin.id as usize][index_by_origin as usize]
     }
 
     // --------
 
-    pub fn nbr_rules(&self) -> CfgRuleFlatId {
+    pub fn nbr_rules(&self) -> CfgRuleId {
         return self.nbr_rules;
     }
 
@@ -382,44 +383,36 @@ impl  Cfg {
         self.rules.iter().flatten()
     }
 
-    pub fn all_rules_with_ids(&self) -> impl Iterator<Item = (CfgRuleFlatId, CfgRuleId, &CfgRule)> {
-        self.rule_flat_id_correspondance
-            .iter()
-            .enumerate()
-            .map(|(rule_flat_id, &rule_id)|
-                (CfgRuleFlatId::try_from(rule_flat_id).unwrap(), rule_id, self.get_rule_by_id(rule_id)))
-    }
-
     pub fn get_rules_by_origin(&self, origin: Symbol) -> &Vec<CfgRule> {
         return &self.rules[origin.id as usize];
     }
     
-    /// returns an iterator which go through each rule of the grammar that can produce produced_symbol
-    pub fn get_rules_producing(&self, produced_symbol: Symbol) -> impl Iterator<Item = &CfgRule> {
+    /// returns an iterator which go through each (rule_id, rule) of the grammar that can produce produced_symbol
+    pub fn get_rules_producing(&self, produced_symbol: Symbol) -> impl Iterator<Item = (CfgRuleId, &CfgRule)> {
         
         let rules_producing_each_symbol: &Vec<Vec<CfgRuleId>> = 
             self.rules_producing_each_symbol.get_or_init(|| self.compute_rules_producing_each_symbol());
 
         (&rules_producing_each_symbol[produced_symbol.id as usize])
             .iter()
-            .map(|rule_id: &CfgRuleId| self.get_rule_by_id(*rule_id))
+            .map(|&rule_id: &CfgRuleId| (rule_id, self.get_rule_by_id(rule_id)))
     }
 
     fn compute_rules_producing_each_symbol(&self) -> Vec<Vec<CfgRuleId>> {
-        // stores a result of type Vec<Vec<CfgRuleId>>
+        // stores a result of type Vec<Vec<CfgRuleCoo>>
         // for each symbol, gives a list of the rules whose replacement contain the symbol
 
         // indexed by symbols produced
         let mut rules_producing_each_symbol: Vec<Vec<CfgRuleId>> = vec![Vec::with_capacity(10); self.nbr_symbols() as usize];
 
         
-        // let distinct_symbols_found: SmallVec<[Symbol; 10]> = SmallVec::new(); ?
-
         // only one heap allocation(maybe one more if there is a large rule)
         let mut distinct_symbols_found: Vec<Symbol> = Vec::with_capacity(10);
 
+        let mut rule_id: CfgRuleId = 0;
+
         for origin in self.all_non_terminals() {
-            for (index, rule) in self.get_rules_by_origin(origin).iter().enumerate() {
+            for (_, rule) in self.get_rules_by_origin(origin).iter().enumerate() {
 
                 distinct_symbols_found.clear();
                 
@@ -428,10 +421,11 @@ impl  Cfg {
                     if distinct_symbols_found.contains(&replacement_symbol) {
                         continue;
                     }
-                    let rule_id: CfgRuleId = CfgRuleId { symbol: origin, index: index.try_into().unwrap()};
                     rules_producing_each_symbol[replacement_symbol.id as usize].push(rule_id);
                     distinct_symbols_found.push(replacement_symbol);
                 }
+
+                rule_id += 1;
             }
         }
 
@@ -455,6 +449,15 @@ impl  Cfg {
         }
     }
 
+    pub fn is_word_nullable(&self, word: &[Symbol]) -> bool {
+        word.iter().all(|&symbol| self.is_symbol_nullable(symbol))
+    }
+
+    pub fn is_rule_nullable(&self, rule_id: CfgRuleId) -> bool {
+        self.get_rule_by_id(rule_id).replacement.iter().all(|&symbol| self.is_symbol_nullable(symbol))
+    }
+
+
     fn compute_are_symbols_nullable(&self) -> BitSet<UINT> {
         // adapted from here:
         // https://cstheory.stackexchange.com/questions/2479/quickly-finding-empty-string-producing-nonterminals-in-a-cfg
@@ -472,33 +475,32 @@ impl  Cfg {
         let mut unprocessed_nullable_symbols: Vec<Symbol> = Vec::with_capacity((self.nbr_non_terminals()/2) as usize); 
 
         // initialize are_nullable and nbr_nullable and unprocessed_nullable_symbols
-        for (flat_id, _, rule) in self.all_rules_with_ids() {
+        for (id, rule) in self.all_rules().enumerate() {
             if rule.is_empty(){
                 if !are_nullable.contains(rule.origin.id as usize) {
                     unprocessed_nullable_symbols.push(rule.origin);
                 }
                 are_nullable.insert(rule.origin.id as usize);
-                nbr_nullable[flat_id as usize] = 0
+                nbr_nullable[id as usize] = 0
             }
             else {
-                let (term, non_term, dist_non_term) = self.count_symbols_in_rule(rule);
+                let (term, _, dist_non_term) = self.count_symbols_in_rule(rule);
                 // if all the symbols in rule.replacement are NTsymbols, it could be nullable
                 // In the opposite case, we won't even consider the rule because we know it is not nullable
                 if term == 0 {
-                    nbr_nullable[flat_id as usize] = dist_non_term;
+                    nbr_nullable[id as usize] = dist_non_term;
                 }
             }
         }
 
         while unprocessed_nullable_symbols.len() > 0 {
             let unprocessed_nullable_symbol: Symbol = unprocessed_nullable_symbols.pop().unwrap();
-            for rule in self.get_rules_producing(unprocessed_nullable_symbol) {
-                self.get
-                nbr_nullable[rule] -= 1;
+            for (id, rule) in self.get_rules_producing(unprocessed_nullable_symbol) {
+                nbr_nullable[id as usize] -= 1;
 
-                if nbr_nullable[rule] == 0 and not is_nullable[rule.origin] {
-                    is_nullable[rule.origin] = True
-                    stack_collapsed.append(rule.origin)
+                if nbr_nullable[id as usize] == 0 && !are_nullable.contains(rule.origin.id as usize) {
+                    are_nullable.insert(rule.origin.id as usize);
+                    unprocessed_nullable_symbols.push(rule.origin);
                 }
             }
         }
@@ -541,5 +543,4 @@ impl  Cfg {
     self.follow_k_sets: dict[int, dict[Symbol, set[TupleSymbolicWord]]] = {}
     self.predict_k_sets: dict[int, dict[CFRule: set[TupleSymbolicWord]]] = {}
      */
-
 
