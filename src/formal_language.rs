@@ -1,4 +1,5 @@
-use std::{cell::{OnceCell, RefCell}, rc::{Rc, Weak}};
+use std::cell::OnceCell;
+use crate::datastructures::flat_table::FlatTable;
 
 use thiserror::Error;
 
@@ -41,16 +42,10 @@ impl Alphabet {
 // meaning that there can (only) be 2^16 = 65578 symbols for one cfg
 type SymbolId = u16;
 
-// to store the index of a CfgRule inside a Vec<CfgRule> of Cfg.rules
-// meaning that there can (only) be 2^8 = 256 rules for a single symbol
-type CfgRuleIdBySymbol = u8;
 
 // to store a value that represents a CfgRule but in a contiguous way
 // meaning that there can (only) be 2^16 = 65578 rules in total
 type CfgRuleId = u16;
-
-// to easily get a CfgRule in a Vec<Vec<CfgRule>>
-type CfgRuleCoo = (Symbol, CfgRuleIdBySymbol);
 
 
 const EXPECTED_RULE_SIZE: usize = 10;
@@ -230,15 +225,12 @@ impl CfgRule {
 pub struct Cfg {
     symbol_set: CfgSymbolSet,
     // indexed by non_terminals
-    rules: Vec<Vec<CfgRule>>,
-    nbr_rules: CfgRuleId,
-    // maps a CfgRuleFlatId to the corresponding 2-dimensionnal coordinates in rules
-    rule_id_correspondance: Vec<CfgRuleCoo>,
+    rules: FlatTable<CfgRule, CfgRuleId>,
 
-    // cached values
+    // -------------- cached values
 
-    // indexed by symbols
-    rules_producing_each_symbol: OnceCell<Vec<Vec<CfgRuleId>>>,
+    // indexed by produced symbols
+    rules_producing_each_symbol: OnceCell<FlatTable<CfgRuleId, SymbolId>>,
 
     // indexed by symbols
     are_symbols_nullable: OnceCell<BitSet<UINT>>,
@@ -258,46 +250,45 @@ pub struct Cfg {
 
 impl  Cfg {
 
-    pub fn new(symbol_set: CfgSymbolSet, rules: Vec<Vec<CfgRule>>) -> Result<Cfg, CfgError> {
+    pub fn new(symbol_set: CfgSymbolSet, mut rules: Vec<CfgRule>) -> Result<Cfg, CfgError> {
         // sorts the rules to match the order of the non_terminals in the symbol_set
 
-        let nbr_non_terminals: usize = symbol_set.get_non_terminals().size() as usize;
-        let nbr_terminals: usize = symbol_set.get_terminals().size() as usize;
+        let nbr_non_terminals: SymbolId = symbol_set.get_non_terminals().size();
+        let nbr_terminals: SymbolId = symbol_set.get_terminals().size();
 
-        let mut nbr_rules: CfgRuleId = 0;
-        let mut rule_id_correspondance: Vec<CfgRuleCoo> = Vec::new();
+        rules.sort_by(|rule1, rule2| rule1.origin.id.cmp(&rule2.origin.id));
 
         // checks that each rule is valid
-        for non_terminal_id in 0..nbr_non_terminals {
-            for (cfg_rule_id_index, rule) in (&rules[non_terminal_id]).iter().enumerate() {
-                if rule.origin.id as usize >= nbr_non_terminals {
-                    return Err(CfgError::InvalidRuleOrigin { rule: rule.clone() });
+        for (rule_id, rule) in rules.iter().enumerate() {
+            if rule.origin.id >= nbr_non_terminals {
+                return Err(CfgError::InvalidRuleOrigin { rule: rule.clone() });
+            }
+
+            for replacement_symbol in &rule.replacement {
+                if replacement_symbol.id >= nbr_non_terminals + nbr_terminals {
+                    return Err(CfgError::InvalidRuleReplacement { rule: rule.clone(), symbol: *replacement_symbol });
                 }
-
-                for replacement_symbol in &rule.replacement {
-                    if replacement_symbol.id as usize>= nbr_non_terminals + nbr_terminals {
-                        return Err(CfgError::InvalidRuleReplacement { rule: rule.clone(), symbol: *replacement_symbol });
-                    }
-                }
-
-                nbr_rules += 1; 
-
-                rule_id_correspondance.push((
-                    Symbol { id: SymbolId::try_from(non_terminal_id).unwrap() },
-                    CfgRuleIdBySymbol::try_from(cfg_rule_id_index).unwrap(),
-                ));
             }
         }
 
-        rule_id_correspondance.shrink_to_fit();
+        let mut rule_origin_correspondance: Vec<CfgRuleId> = Vec::with_capacity(nbr_non_terminals as usize);
+        let mut current_rule_id: CfgRuleId = 0;
+        for non_terminal_id in 0..nbr_non_terminals {
+            rule_origin_correspondance.push(current_rule_id);
+            let mut i = 0;
+            while ((current_rule_id + i) as usize != rules.len()) 
+                && (rules[(current_rule_id + i) as usize].origin.id == non_terminal_id) {
+                i += 1;
+            }
+            current_rule_id += i;
+        }
 
         Ok(Cfg {
             symbol_set,
-            rules,
-            nbr_rules,
-            rule_id_correspondance,
+            rules: FlatTable::new(rules, rule_origin_correspondance),
 
             rules_producing_each_symbol: OnceCell::new(),
+
             are_symbols_nullable: OnceCell::new(),
 
         })
@@ -322,15 +313,15 @@ impl  Cfg {
     }
 
     pub fn all_non_terminals(&self) -> impl Iterator<Item = Symbol> {
-        (0..(self.nbr_non_terminals() as SymbolId)).map(|id: SymbolId| Symbol {id})
+        (0..self.nbr_non_terminals()).map(|id: SymbolId| Symbol {id})
     }
 
     pub fn all_terminals(&self) -> impl Iterator<Item = Symbol> {
-        (self.nbr_non_terminals()..(self.nbr_symbols() as SymbolId)).map(|id: SymbolId| Symbol {id})
+        (self.nbr_non_terminals()..self.nbr_symbols()).map(|id: SymbolId| Symbol {id})
     }
 
     pub fn all_symbols(&self) -> impl Iterator<Item = Symbol> {
-        (0..((self.nbr_terminals() + self.nbr_non_terminals()) as SymbolId)).map(|id: SymbolId| Symbol {id})
+        (0..self.nbr_terminals() + self.nbr_non_terminals()).map(|id: SymbolId| Symbol {id})
     }
 
     pub fn is_terminal(&self, symbol: Symbol) -> bool {
@@ -368,29 +359,36 @@ impl  Cfg {
     // --------
 
     fn get_rule_by_id(&self, id: CfgRuleId) -> &CfgRule {
-        // no check: we assume that every CfgRuleFlatId constructed is valid
-        let (origin, index_by_origin) = self.rule_id_correspondance[id as usize];
-        &self.rules[origin.id as usize][index_by_origin as usize]
+        // no check: we assume that every CfgRuleId constructed is valid
+        self.rules.get_by_id(id)
     }
 
     // --------
 
     pub fn nbr_rules(&self) -> CfgRuleId {
-        return self.nbr_rules;
+        return self.rules.size();
     }
 
-    pub fn all_rules(&self) -> impl Iterator<Item = &CfgRule> {
-        self.rules.iter().flatten()
+    pub fn all_rules(&self) -> impl Iterator<Item = (CfgRuleId, &CfgRule)> {
+        self.rules
+            .table
+            .iter()
+            .enumerate()
+            .map(|(id, rule)| (CfgRuleId::try_from(id).unwrap(), rule))
     }
 
-    pub fn get_rules_by_origin(&self, origin: Symbol) -> &Vec<CfgRule> {
-        return &self.rules[origin.id as usize];
+    pub fn get_rules_by_origin(&self, origin: Symbol) -> impl Iterator<Item = (CfgRuleId, &CfgRule)> {
+        let rule_id: CfgRuleId = self.rules.rows[origin.id as usize];
+        (&self.rules[origin.id])
+            .iter()
+            .enumerate()
+            .map(move |(id, rule)| (CfgRuleId::try_from(id).unwrap() + rule_id, rule))
     }
     
     /// returns an iterator which go through each (rule_id, rule) of the grammar that can produce produced_symbol
     pub fn get_rules_producing(&self, produced_symbol: Symbol) -> impl Iterator<Item = (CfgRuleId, &CfgRule)> {
         
-        let rules_producing_each_symbol: &Vec<Vec<CfgRuleId>> = 
+        let rules_producing_each_symbol: &FlatTable<CfgRuleId, SymbolId> = 
             self.rules_producing_each_symbol.get_or_init(|| self.compute_rules_producing_each_symbol());
 
         (&rules_producing_each_symbol[produced_symbol.id as usize])
@@ -398,41 +396,40 @@ impl  Cfg {
             .map(|&rule_id: &CfgRuleId| (rule_id, self.get_rule_by_id(rule_id)))
     }
 
-    fn compute_rules_producing_each_symbol(&self) -> Vec<Vec<CfgRuleId>> {
+    fn compute_rules_producing_each_symbol(&self) -> FlatTable<CfgRuleId, SymbolId> {
         // stores a result of type Vec<Vec<CfgRuleCoo>>
         // for each symbol, gives a list of the rules whose replacement contain the symbol
 
         // indexed by symbols produced
         let mut rules_producing_each_symbol: Vec<Vec<CfgRuleId>> = vec![Vec::with_capacity(10); self.nbr_symbols() as usize];
 
+        let mut flat_table_size: usize = 0;
         
         // only one heap allocation(maybe one more if there is a large rule)
-        let mut distinct_symbols_found: Vec<Symbol> = Vec::with_capacity(10);
+        let mut distinct_symbols_found: Vec<Symbol> = Vec::with_capacity(EXPECTED_RULE_SIZE);
+        for (rule_id, rule) in self.all_rules() {
 
-        let mut rule_id: CfgRuleId = 0;
+            distinct_symbols_found.clear();
+            
+            for &replacement_symbol in &rule.replacement {
 
-        for origin in self.all_non_terminals() {
-            for (_, rule) in self.get_rules_by_origin(origin).iter().enumerate() {
-
-                distinct_symbols_found.clear();
-                
-                for &replacement_symbol in &rule.replacement {
-
-                    if distinct_symbols_found.contains(&replacement_symbol) {
-                        continue;
-                    }
-                    rules_producing_each_symbol[replacement_symbol.id as usize].push(rule_id);
-                    distinct_symbols_found.push(replacement_symbol);
+                if distinct_symbols_found.contains(&replacement_symbol) {
+                    continue;
                 }
-
-                rule_id += 1;
+                rules_producing_each_symbol[replacement_symbol.id as usize].push(rule_id);
+                distinct_symbols_found.push(replacement_symbol);
+                flat_table_size += 1;
             }
         }
+
+        let mut table: Vec<CfgRuleId> = Vec::with_capacity(flat_table_size);
+        let mut rows: Vec<SymbolId> = Vec::with_capacity(self.nbr_non_terminals() as usize);
 
         for symbol_produced in self.all_symbols() {
             rules_producing_each_symbol[symbol_produced.id as usize].shrink_to_fit();
         }
 
+        FlatTable::new(table, rows)
         rules_producing_each_symbol
     }
 
@@ -475,7 +472,7 @@ impl  Cfg {
         let mut unprocessed_nullable_symbols: Vec<Symbol> = Vec::with_capacity((self.nbr_non_terminals()/2) as usize); 
 
         // initialize are_nullable and nbr_nullable and unprocessed_nullable_symbols
-        for (id, rule) in self.all_rules().enumerate() {
+        for (id, rule) in self.all_rules() {
             if rule.is_empty(){
                 if !are_nullable.contains(rule.origin.id as usize) {
                     unprocessed_nullable_symbols.push(rule.origin);
