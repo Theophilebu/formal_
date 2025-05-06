@@ -101,111 +101,73 @@ pub fn create_regex_grammar() -> Cfg {
     // S for Symbol
     let S = |s: &str| cfg_symbol_set.get_symbol_by_representation(s);
 
+    let rules:Vec<CfgRule> = vec![
+        CfgRule { origin: S("START"), replacement: vec![S("Expression"), S("END")]},
+        CfgRule { origin: S("START"), replacement: vec![S("END")]}, 
 
+        CfgRule { origin: S("Expression"), replacement: vec![S("Sequence"), S("Union__Extend")]}, 
 
-    let rules:Vec<Vec<CfgRule>> = vec![
-        vec![
-            CfgRule { origin: S("START"), replacement: vec![S("Expression"), S("END")]},
-            CfgRule { origin: S("START"), replacement: vec![S("END")]}, 
-        ],
+        CfgRule { origin: S("Union__Extend"), replacement: vec![S("|"), S("Sequence")]},
+        CfgRule { origin: S("Union__Extend"), replacement: vec![]}, 
 
-        vec![
-            CfgRule { origin: S("Expression"), replacement: vec![S("Sequence"), S("Union__Extend")]}, 
-        ],
+        CfgRule { origin: S("Sequence"), replacement: vec![S("Term"), S("Sequence__Extend")]},
 
-        vec![
-            CfgRule { origin: S("Union__Extend"), replacement: vec![S("|"), S("Sequence")]},
-            CfgRule { origin: S("Union__Extend"), replacement: vec![]}, 
-        ],
+        CfgRule { origin: S("Sequence__Extend"), replacement: vec![S("Term"), S("Sequence__Extend")]},
+        CfgRule { origin: S("Sequence__Extend"), replacement: vec![]}, 
 
-        vec![
-            CfgRule { origin: S("Sequence"), replacement: vec![S("Term"), S("Sequence__Extend")]},
-        ],
+        CfgRule { origin: S("Term"), replacement: vec![S("Item"), S("Modifier__Optional")]},
+        // CfgRule { origin: S("Term"), replacement: vec![]}, 
 
-        vec![
-            CfgRule { origin: S("Sequence__Extend"), replacement: vec![S("Term"), S("Sequence__Extend")]},
-            CfgRule { origin: S("Sequence__Extend"), replacement: vec![]}, 
-        ],
+        CfgRule { origin: S("Modifier__Optional"), replacement: vec![S("Modifier")]},
+        CfgRule { origin: S("Modifier__Optional"), replacement: vec![]}, 
 
-        vec![
-            CfgRule { origin: S("Term"), replacement: vec![S("Item"), S("Modifier__Optional")]},
-            CfgRule { origin: S("Term"), replacement: vec![]}, 
-        ],
+        CfgRule { origin: S("Modifier"), replacement: vec![S("*")]},
+        CfgRule { origin: S("Modifier"), replacement: vec![S("+")]},
+        CfgRule { origin: S("Modifier"), replacement: vec![S("?")]},
+        CfgRule { origin: S("Modifier"), replacement: vec![S("+?")]},
+        CfgRule { origin: S("Modifier"), replacement: vec![S("*?")]},
+        CfgRule { origin: S("Modifier"), replacement: vec![S("Interval")]},
 
-        vec![
-            CfgRule { origin: S("Modifier__Optional"), replacement: vec![S("Modifier")]},
-            CfgRule { origin: S("Modifier__Optional"), replacement: vec![]}, 
-        ],
+        CfgRule { origin: S("Interval"), replacement: vec![S("{"), S("Integer__Optional"), S(","), S("Integer__Optional"), S("}")]},
 
-        vec![
-            CfgRule { origin: S("Modifier"), replacement: vec![S("*")]},
-            CfgRule { origin: S("Modifier"), replacement: vec![S("+")]},
-            CfgRule { origin: S("Modifier"), replacement: vec![S("?")]},
-            CfgRule { origin: S("Modifier"), replacement: vec![S("+?")]},
-            CfgRule { origin: S("Modifier"), replacement: vec![S("*?")]},
-            CfgRule { origin: S("Modifier"), replacement: vec![S("Interval")]},
-        ],
+        CfgRule { origin: S("Integer__Optional"), replacement: vec![S("int")]},
+        CfgRule { origin: S("Integer__Optional"), replacement: vec![]}, 
 
-        vec![
-            CfgRule { origin: S("Interval"), replacement: vec![S("{"), S("Integer__Optional"), S(","), S("Integer__Optional"), S("}")]},
-        ],
+        CfgRule { origin: S("Item"), replacement: vec![S("char")]},
+        CfgRule { origin: S("Item"), replacement: vec![S(".")]},
+        CfgRule { origin: S("Item"), replacement: vec![S("^")]},
+        CfgRule { origin: S("Item"), replacement: vec![S("$")]},
+        CfgRule { origin: S("Item"), replacement: vec![S("List")]},
+        CfgRule { origin: S("Item"), replacement: vec![S("Group")]},
 
-        vec![
-            CfgRule { origin: S("Integer__Optional"), replacement: vec![S("int")]},
-            CfgRule { origin: S("Integer__Optional"), replacement: vec![]}, 
-        ],
+        CfgRule { origin: S("Group"), replacement: vec![S("("), S("Expression"), S(")")]},
 
-        vec![
-            CfgRule { origin: S("Item"), replacement: vec![S("char")]},
-            CfgRule { origin: S("Item"), replacement: vec![S(".")]},
-            CfgRule { origin: S("Item"), replacement: vec![S("^")]},
-            CfgRule { origin: S("Item"), replacement: vec![S("$")]},
-            CfgRule { origin: S("Item"), replacement: vec![S("List")]},
-            CfgRule { origin: S("Item"), replacement: vec![S("Group")]},
-        ],
+        CfgRule { origin: S("List"), replacement: vec![S("["), S("Hat__Optional"), S("ListSequence"), S("]")]},
 
-        vec![
-            CfgRule { origin: S("Group"), replacement: vec![S("("), S("Expression"), S(")")]},
-        ],
+        CfgRule { origin: S("Hat__Optional"), replacement: vec![S("^")]},
+        CfgRule { origin: S("Hat__Optional"), replacement: vec![]}, 
 
-        vec![
-            CfgRule { origin: S("List"), replacement: vec![S("["), S("Hat__Optional"), S("ListSequence"), S("]")]},
-        ],
+        CfgRule { origin: S("ListSequence"), replacement: vec![S("ListMember"), S("ListSequence__Extend")]},
 
-        vec![
-            CfgRule { origin: S("Hat__Optional"), replacement: vec![S("^")]},
-            CfgRule { origin: S("Hat__Optional"), replacement: vec![]}, 
-        ],
+        CfgRule { origin: S("ListSequence__Extend"), replacement: vec![S("ListMember"), S("ListSequence__Extend")]},
+        CfgRule { origin: S("ListSequence__Extend"), replacement: vec![]},
 
-        vec![
-            CfgRule { origin: S("ListSequence"), replacement: vec![S("ListMember"), S("ListSequence__Extend")]},
-        ],
+        CfgRule { origin: S("ListMember"), replacement: vec![S("list_char")]},
+        CfgRule { origin: S("ListMember"), replacement: vec![S("CharClass")]},
 
-        vec![
-            CfgRule { origin: S("ListSequence__Extend"), replacement: vec![S("ListMember"), S("ListSequence__Extend")]},
-            CfgRule { origin: S("ListSequence__Extend"), replacement: vec![]},
-        ],
-
-        vec![
-            CfgRule { origin: S("ListMember"), replacement: vec![S("list_char")]},
-            CfgRule { origin: S("ListMember"), replacement: vec![S("CharClass")]},
-        ],
-
-        vec![
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:alnum:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:word:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:alpha:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:blank:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:cntrl:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:digit:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:graph:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:lower:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:print:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:punct:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:space:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:upper:]")]},
-            CfgRule { origin: S("CharClass"), replacement: vec![S("[:xdigit:]")]},
-        ],
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:alnum:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:word:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:alpha:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:blank:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:cntrl:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:digit:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:graph:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:lower:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:print:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:punct:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:space:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:upper:]")]},
+        CfgRule { origin: S("CharClass"), replacement: vec![S("[:xdigit:]")]},
 
     ];
 
@@ -225,17 +187,28 @@ mod tests{
 
         for non_terminal in cfg.all_non_terminals() {
             println!("{:?}", non_terminal);
-            println!("{:?}", cfg.get_symbol_set().get_non_terminals().get_representation(non_terminal.id));
+            println!("{:?}", cfg.repr_symbol(non_terminal));
         }
 
         for terminal in cfg.all_terminals() {
             println!("{:?}", terminal);
-            println!("{:?}", cfg.get_symbol_set().get_terminals().get_representation(terminal.id - cfg.nbr_non_terminals()));
+            println!("{:?}", cfg.repr_symbol(terminal));
         }
 
 
-        for rule in cfg.all_rules() {
-            println!("{:?}", rule);
+        for (rule_id, rule) in cfg.all_rules() {
+            println!("{}", cfg.repr_rule(rule_id));
+        }
+
+        for symbol in cfg.all_symbols() {
+            println!("symbol : {}", cfg.repr_symbol(symbol));
+            for (rule_id, rule) in cfg.get_rules_producing(symbol) {
+                println!("    {:?}", cfg.repr_rule(rule_id));
+            }
+        }
+
+        for symbol in cfg.all_symbols() {
+            println!("symbol : {}, {}", cfg.repr_symbol(symbol), cfg.is_symbol_nullable(symbol));
         }
     }
 }

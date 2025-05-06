@@ -154,7 +154,7 @@ impl <'alp, RETURN: Clone, DATA> Nfa<'alp, RETURN, DATA>
             };
 
             // checks origin
-            if (0>transition.origin_state_id || transition.origin_state_id>=nbr_states) {
+            if transition.origin_state_id>=nbr_states {
                 return Err(NfaError::InvalidTransitionChar {transition});
             }
 

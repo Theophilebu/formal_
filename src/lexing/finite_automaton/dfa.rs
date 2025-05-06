@@ -141,12 +141,12 @@ impl <'alp, RETURN: Clone, DATA> Dfa<'alp, RETURN, DATA>
             let char_id: usize = opt_cher_id.unwrap();
 
             // checks origin
-            if (0>transition.origin_state_id || transition.origin_state_id>=nbr_states) {
+            if transition.origin_state_id>=nbr_states {
                 return Err(DfaError::InvalidTransitionChar {transition});
             }
 
             // checks target
-            if (0>transition.target_state_id || transition.target_state_id>=nbr_states) {
+            if transition.target_state_id>=nbr_states {
                 return Err(DfaError::InvalidTransitionChar {transition});
             }
 
